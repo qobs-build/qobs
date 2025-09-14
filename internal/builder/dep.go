@@ -46,6 +46,10 @@ func fetchDependency(dep string, toWhere string) (string, error) {
 	if strings.HasPrefix(dep, gitPrefix) {
 		return cloneGitRepo(dep[len(gitPrefix):], toWhere)
 	}
+	// or suffix
+	if strings.HasSuffix(dep, ".git") {
+		return cloneGitRepo(dep, toWhere)
+	}
 
 	// check for shortcut prefix, e.g. gh:zeozeozeo/libhelloworld
 	for shortcut, url := range depShortcuts {
