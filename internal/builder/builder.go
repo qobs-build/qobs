@@ -171,7 +171,11 @@ func (b *Builder) collectFiles(pkg *Package, patterns []string, stripFilename bo
 				return nil, fmt.Errorf("while globbing directory %s: %w", match, err)
 			}
 			if stripFilename {
-				stripmap[filepath.Dir(absPath)] = struct{}{}
+				if stat, err := os.Stat(absPath); err == nil && !stat.IsDir() {
+					stripmap[filepath.Dir(absPath)] = struct{}{} // this is a file, we need directories
+				} else {
+					stripmap[absPath] = struct{}{}
+				}
 			} else {
 				files = append(files, absPath)
 			}
@@ -185,17 +189,6 @@ func (b *Builder) collectFiles(pkg *Package, patterns []string, stripFilename bo
 	}
 
 	return files, nil
-}
-
-func includeCflags(paths []string) string {
-	var cflagsb strings.Builder
-	for _, includePath := range paths {
-		cflagsb.WriteByte(' ')
-		cflagsb.WriteString(`-I"`)
-		cflagsb.WriteString(includePath)
-		cflagsb.WriteByte('"')
-	}
-	return cflagsb.String()
 }
 
 // Build resolves the entire dependency graph and then generates a single build file
@@ -213,7 +206,6 @@ func (b *Builder) Build() error {
 	}
 
 	g := &gen.NinjaGen{}
-	//allIncludePaths := []string{}
 	var rootPkg *Package
 
 	// add targets
@@ -227,14 +219,22 @@ func (b *Builder) Build() error {
 		if err != nil {
 			return fmt.Errorf("failed to collect sources for %s: %w", pkg.Name, err)
 		}
-		headers, err := b.collectFiles(pkg, pkg.Config.Target.Headers, true)
+
+		// collect own headers
+		ownHeaders, err := b.collectFiles(pkg, pkg.Config.Target.Headers, true)
 		if err != nil {
 			return fmt.Errorf("failed to collect headers for %s: %w", pkg.Name, err)
 		}
-		//allIncludePaths = append(allIncludePaths, headers...)
 
 		// determine the outputs of its dependencies
 		var depOutputs []string
+		var cflags []string
+
+		// add own include paths to cflags
+		for _, includePath := range ownHeaders {
+			cflags = append(cflags, `-I"`+includePath+`"`)
+		}
+
 		for depName := range pkg.Config.Dependencies {
 			dep, ok := packages[depName]
 			if !ok {
@@ -244,14 +244,19 @@ func (b *Builder) Build() error {
 				return fmt.Errorf("package `%s` depends on `%s`, which is not a library (target.lib = false)", pkg.Name, dep.Name)
 			}
 			depOutputs = append(depOutputs, dep.outputName())
+
+			// Collect and add dependency header paths to cflags
+			depHeaders, err := b.collectFiles(dep, dep.Config.Target.Headers, true)
+			if err != nil {
+				return fmt.Errorf("failed to collect headers for dependency %s: %w", dep.Name, err)
+			}
+			for _, includePath := range depHeaders {
+				cflags = append(cflags, `-I"`+includePath+`"`)
+			}
 		}
 
-		var cflags []string
 		var ldflags []string
 
-		for _, includePath := range headers {
-			cflags = append(cflags, `-I"`+includePath+`"`)
-		}
 		for define, v := range pkg.Config.Target.Defines {
 			if v != "" {
 				cflags = append(cflags, "-D"+define+`="`+v+`"`)
@@ -276,7 +281,6 @@ func (b *Builder) Build() error {
 	}
 
 	// generate the buildfile
-	//includeCflags(allIncludePaths)
 	g.SetCompiler(findCompiler(false), findCompiler(true))
 
 	out := g.Generate()

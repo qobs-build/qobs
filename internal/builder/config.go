@@ -15,7 +15,7 @@ import (
 type Config struct {
 	Package      PackageSection           `toml:"package"`
 	RawTarget    map[string]TargetSection `toml:"target"`
-	Target       TargetSection            `toml:"-"`
+	Target       TargetSection            `toml:"target"`
 	Dependencies map[string]string        `toml:"dependencies"`
 }
 
@@ -49,14 +49,21 @@ func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 	dec := toml.NewDecoder(rdr)
 	dec.DisallowUnknownFields()
 	cfg := new(Config)
+
 	if err := dec.Decode(cfg); err != nil {
 		if derr, ok := err.(*toml.DecodeError); ok {
 			return nil, errors.New(derr.String())
 		}
 		return nil, err
 	}
-	err := cfg.evaluate(env)
-	return cfg, err
+
+	if len(cfg.RawTarget) > 0 {
+		if err := cfg.evaluate(env); err != nil {
+			return nil, err
+		}
+	}
+
+	return cfg, nil
 }
 
 // ParseConfigFromFile parses and validates a config file from a filepath
