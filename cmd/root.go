@@ -29,7 +29,7 @@ func doBuild(cmd *cobra.Command, args []string) {
 var rootCmd = &cobra.Command{
 	Use:   "qobs [target path]",
 	Short: "Quite OK Build System",
-	Long:  `Joyful C/C++ build system and package manager`,
+	Long:  `Quite OK Build System`,
 	Args:  cobra.MinimumNArgs(1),
 	Run:   doBuild,
 }

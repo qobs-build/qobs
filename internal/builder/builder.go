@@ -44,6 +44,7 @@ func (p *Package) outputName() string {
 type Builder struct {
 	cfg     *Config
 	basedir string
+	env     map[string]any
 }
 
 func NewBuilderInDirectory(path string) (*Builder, error) {
@@ -52,20 +53,21 @@ func NewBuilderInDirectory(path string) (*Builder, error) {
 	if err != nil {
 		return nil, err
 	}
-	cfg, err := ParseConfigFromFile(filepath.Join(path, "Qobs.toml"))
+	env := NewConfigEnv()
+	cfg, err := ParseConfigFromFile(filepath.Join(path, "Qobs.toml"), env)
 	if err != nil {
 		return nil, err
 	}
-	return &Builder{cfg: cfg, basedir: path}, nil
+	return &Builder{cfg: cfg, basedir: path, env: env}, nil
 }
 
-func resolveBuildGraph(rootPath string, depsDir string) (map[string]*Package, error) {
+func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string]*Package, error) {
 	packages := make(map[string]*Package)
 	var queue []string
 	processed := make(map[string]bool)
 
 	// process the root package first
-	rootConfig, err := ParseConfigFromFile(filepath.Join(rootPath, "Qobs.toml"))
+	rootConfig, err := ParseConfigFromFile(filepath.Join(rootPath, "Qobs.toml"), b.env)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +119,7 @@ func resolveBuildGraph(rootPath string, depsDir string) (map[string]*Package, er
 		}
 
 		// parse its config and add it to the graph
-		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"))
+		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"), b.env)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse config for dependency %s: %w", depName, err)
 		}
@@ -205,13 +207,13 @@ func (b *Builder) Build() error {
 	}
 
 	// resolve buildgraph
-	packages, err := resolveBuildGraph(b.basedir, depsDir)
+	packages, err := b.resolveBuildGraph(b.basedir, depsDir)
 	if err != nil {
 		return fmt.Errorf("failed to resolve dependency graph: %w", err)
 	}
 
 	g := &gen.NinjaGen{}
-	allIncludePaths := []string{}
+	//allIncludePaths := []string{}
 	var rootPkg *Package
 
 	// add targets
@@ -229,7 +231,7 @@ func (b *Builder) Build() error {
 		if err != nil {
 			return fmt.Errorf("failed to collect headers for %s: %w", pkg.Name, err)
 		}
-		allIncludePaths = append(allIncludePaths, headers...)
+		//allIncludePaths = append(allIncludePaths, headers...)
 
 		// determine the outputs of its dependencies
 		var depOutputs []string
@@ -244,12 +246,28 @@ func (b *Builder) Build() error {
 			depOutputs = append(depOutputs, dep.outputName())
 		}
 
+		var cflags []string
+		var ldflags []string
+
+		for _, includePath := range headers {
+			cflags = append(cflags, `-I"`+includePath+`"`)
+		}
+		for define, v := range pkg.Config.Target.Defines {
+			if v != "" {
+				cflags = append(cflags, "-D"+define+`="`+v+`"`)
+			} else {
+				cflags = append(cflags, "-D"+define)
+			}
+		}
+
 		g.AddTarget(
 			pkg.outputName(),
 			pkg.Path,
 			sources,
 			depOutputs,
 			pkg.Config.Target.Lib,
+			strings.Join(cflags, " "),
+			strings.Join(ldflags, " "),
 		)
 	}
 
@@ -258,8 +276,8 @@ func (b *Builder) Build() error {
 	}
 
 	// generate the buildfile
-	cflags := includeCflags(allIncludePaths)
-	g.SetCompiler(cflags, "", findCompiler(false), findCompiler(true))
+	//includeCflags(allIncludePaths)
+	g.SetCompiler(findCompiler(false), findCompiler(true))
 
 	out := g.Generate()
 	buildFile := filepath.Join(buildDir, g.BuildFile())

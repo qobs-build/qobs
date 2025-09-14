@@ -1,0 +1,16 @@
+[package]
+name = "platform-define"
+description = "This is where I make a project."
+authors = ["AzureDiamond"]
+
+[target]
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+defines = { PLATFORM_STRING = "No clue." }
+
+[target.'target_os == "windows"']
+defines = { PLATFORM_STRING = "You are on Windows!" }
+
+[target.'target_os == "linux"']
+defines = { PLATFORM_STRING = "You are on Linux!" }
+
+[dependencies]

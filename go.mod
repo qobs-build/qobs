@@ -3,6 +3,7 @@ module github.com/zeozeozeo/qobs
 go 1.25.1
 
 require (
+	github.com/expr-lang/expr v1.17.6
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v6 v6.0.0-20250910120214-3a68d0404116
 	github.com/spf13/cobra v1.10.1
