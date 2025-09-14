@@ -21,7 +21,7 @@ func doBuild(cmd *cobra.Command, args []string) {
 	if err != nil {
 		msg.Fatal("%v", err)
 	}
-	if _, err := b.Build(); err != nil {
+	if err := b.Build(); err != nil {
 		msg.Fatal("%v", err)
 	}
 }

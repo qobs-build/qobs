@@ -18,12 +18,6 @@ var (
 	errCantRunLib = errors.New("can't run a library target (target.lib is true)")
 )
 
-// BuildResult is the output of a successful build for the root package
-type BuildResult struct {
-	IncludePaths []string
-	LinkObjects  []string
-}
-
 // Package represents a single component (root package or dependency) in the build graph
 type Package struct {
 	Name   string
@@ -203,17 +197,17 @@ func includeCflags(paths []string) string {
 }
 
 // Build resolves the entire dependency graph and then generates a single build file
-func (b *Builder) Build() (*BuildResult, error) {
+func (b *Builder) Build() error {
 	buildDir := filepath.Join(b.basedir, "build")
 	depsDir := filepath.Join(buildDir, "_deps")
 	if err := os.MkdirAll(depsDir, 0755); err != nil {
-		return nil, err
+		return err
 	}
 
 	// resolve buildgraph
 	packages, err := resolveBuildGraph(b.basedir, depsDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to resolve dependency graph: %w", err)
+		return fmt.Errorf("failed to resolve dependency graph: %w", err)
 	}
 
 	g := &gen.NinjaGen{}
@@ -229,11 +223,11 @@ func (b *Builder) Build() (*BuildResult, error) {
 		// collect files for the package
 		sources, err := b.collectFiles(pkg, pkg.Config.Target.Sources, false)
 		if err != nil {
-			return nil, fmt.Errorf("failed to collect sources for %s: %w", pkg.Name, err)
+			return fmt.Errorf("failed to collect sources for %s: %w", pkg.Name, err)
 		}
 		headers, err := b.collectFiles(pkg, pkg.Config.Target.Headers, true)
 		if err != nil {
-			return nil, fmt.Errorf("failed to collect headers for %s: %w", pkg.Name, err)
+			return fmt.Errorf("failed to collect headers for %s: %w", pkg.Name, err)
 		}
 		allIncludePaths = append(allIncludePaths, headers...)
 
@@ -242,10 +236,10 @@ func (b *Builder) Build() (*BuildResult, error) {
 		for depName := range pkg.Config.Dependencies {
 			dep, ok := packages[depName]
 			if !ok {
-				return nil, fmt.Errorf("internal error: resolved dependency `%s` not found in package map", depName)
+				return fmt.Errorf("internal error: resolved dependency `%s` not found in package map", depName)
 			}
 			if !dep.Config.Target.Lib {
-				return nil, fmt.Errorf("package `%s` depends on `%s`, which is not a library (target.lib = false)", pkg.Name, dep.Name)
+				return fmt.Errorf("package `%s` depends on `%s`, which is not a library (target.lib = false)", pkg.Name, dep.Name)
 			}
 			depOutputs = append(depOutputs, dep.outputName())
 		}
@@ -260,29 +254,24 @@ func (b *Builder) Build() (*BuildResult, error) {
 	}
 
 	if rootPkg == nil {
-		return nil, errors.New("internal error: root package not found after graph resolution")
+		return errors.New("internal error: root package not found after graph resolution")
 	}
 
 	// generate the buildfile
 	cflags := includeCflags(allIncludePaths)
-	g.SetCompiler(cflags, "", "clang")
+	g.SetCompiler(cflags, "", findCompiler(false), findCompiler(true))
 
 	out := g.Generate()
 	buildFile := filepath.Join(buildDir, g.BuildFile())
 	if err = os.WriteFile(buildFile, []byte(out), 0644); err != nil {
-		return nil, err
+		return err
 	}
 
 	if err := g.Invoke(buildDir); err != nil {
-		return nil, err
+		return err
 	}
 
-	finalResult := &BuildResult{
-		IncludePaths: allIncludePaths,
-		LinkObjects:  []string{filepath.Join(buildDir, rootPkg.outputName())},
-	}
-
-	return finalResult, nil
+	return nil
 }
 
 func (b *Builder) BuildAndRun(args []string) error {
@@ -290,7 +279,7 @@ func (b *Builder) BuildAndRun(args []string) error {
 		return errCantRunLib
 	}
 
-	if _, err := b.Build(); err != nil {
+	if err := b.Build(); err != nil {
 		return err
 	}
 

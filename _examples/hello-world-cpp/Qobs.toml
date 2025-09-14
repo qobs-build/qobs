@@ -1,0 +1,9 @@
+[package]
+name = "hello-world-cpp"
+description = "This is where I make a project."
+authors = ["AzureDiamond"]
+
+[target]
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+
+[dependencies]

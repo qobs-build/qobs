@@ -28,3 +28,10 @@ func Fatal(format string, a ...any) {
 	fmt.Print("\n")
 	os.Exit(1)
 }
+
+func Info(format string, a ...any) {
+	fmt.Print(color.HiGreenString("info"))
+	fmt.Print(": ")
+	fmt.Printf(format, a...)
+	fmt.Print("\n")
+}
