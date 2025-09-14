@@ -16,9 +16,12 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
 
+	"github.com/fatih/color"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
 var depShortcuts = map[string]string{
@@ -94,13 +97,33 @@ func parseGitURL(rawURL string) (res gitURL) {
 	return
 }
 
+type indentWriter struct {
+	Indent    int
+	W         io.Writer
+	didIndent bool
+}
+
+func (w *indentWriter) Write(p []byte) (n int, err error) {
+	for _, c := range p {
+		if !w.didIndent {
+			w.W.Write([]byte(strings.Repeat(" ", w.Indent)))
+			w.didIndent = true
+		}
+		w.W.Write([]byte{c})
+		if c == '\n' || c == '\r' {
+			w.didIndent = false
+		}
+	}
+	return len(p), nil
+}
+
 // cloneGitRepo clones a Git remote into the specified directory
 func cloneGitRepo(url, toWhere string) (string, error) {
 	parsedURL := parseGitURL(url)
 
 	cloneOptions := &git.CloneOptions{
 		URL:               parsedURL.cleanURL,
-		Progress:          os.Stdout,
+		Progress:          &indentWriter{Indent: 4, W: os.Stdout},
 		RecurseSubmodules: git.DefaultSubmoduleRecursionDepth,
 	}
 
@@ -112,6 +135,8 @@ func cloneGitRepo(url, toWhere string) (string, error) {
 		cloneOptions.ReferenceName = plumbing.NewBranchReferenceName(parsedURL.branch)
 		cloneOptions.SingleBranch = true
 	}
+
+	fmt.Printf("  %s %s\n", color.HiGreenString("Cloning"), parsedURL.cleanURL)
 
 	repo, err := git.PlainClone(toWhere, cloneOptions)
 	if err != nil {
@@ -197,6 +222,8 @@ func downloadAndExtractArchive(downloadURL, toWhere string) (string, error) {
 		expectedMD5 = parts[1]
 	}
 
+	fmt.Printf("  %s %s\n", color.HiGreenString("Fetching"), cleanURL)
+
 	resp, err := http.Get(cleanURL)
 	if err != nil {
 		return "", fmt.Errorf("failed to download from url %s: %w", cleanURL, err)
@@ -215,9 +242,15 @@ func downloadAndExtractArchive(downloadURL, toWhere string) (string, error) {
 	defer os.Remove(archivePath)
 
 	hash := md5.New()
-	writer := io.MultiWriter(tmpFile, hash)
 
-	_, err = io.Copy(writer, resp.Body)
+	pb := &msg.ProgressBar{
+		Total:  resp.ContentLength,
+		Indent: 1,
+		W:      os.Stdout,
+		Start:  time.Now(),
+	}
+
+	_, err = io.Copy(io.MultiWriter(tmpFile, hash, pb), resp.Body)
 	if err != nil {
 		tmpFile.Close()
 		return "", fmt.Errorf("failed to write to temporary file: %w", err)
@@ -225,6 +258,7 @@ func downloadAndExtractArchive(downloadURL, toWhere string) (string, error) {
 	if err := tmpFile.Close(); err != nil {
 		return "", fmt.Errorf("failed to close temporary file: %w", err)
 	}
+	pb.Finish()
 
 	if expectedMD5 != "" {
 		calculatedMD5 := hex.EncodeToString(hash.Sum(nil))
