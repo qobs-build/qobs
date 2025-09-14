@@ -8,3 +8,6 @@ sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
 
 [dependencies]
 libhelloworld = "gh:zeozeozeo/libhelloworld" # shortcut for github; there are multiple other shortcuts supported
+
+# or use a zip/tar file:
+# libhelloworld = "https://github.com/zeozeozeo/libhelloworld/archive/refs/heads/main.zip"

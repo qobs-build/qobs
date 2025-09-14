@@ -1,10 +1,20 @@
 package builder
 
 import (
+	"archive/tar"
+	"archive/zip"
+	"bytes"
+	"compress/gzip"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"os"
+	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/go-git/go-git/v6"
@@ -19,8 +29,6 @@ var depShortcuts = map[string]string{
 	"cb:": "https://codeberg.org/",
 }
 
-const gitPrefix = "git:"
-
 var (
 	errIllegalDep = errors.New("empty or illegal dependency string")
 )
@@ -31,6 +39,7 @@ func fetchDependency(dep string, toWhere string) (string, error) {
 	}
 
 	// check for `git:` prefix, e.g. git:https://github.com/zeozeozeo/libhelloworld.git
+	const gitPrefix = "git:"
 	if strings.HasPrefix(dep, gitPrefix) {
 		return cloneGitRepo(dep[len(gitPrefix):], toWhere)
 	}
@@ -133,6 +142,263 @@ func cloneGitRepo(url, toWhere string) (string, error) {
 	return toWhere, nil
 }
 
-func downloadAndExtractArchive(url, toWhere string) (string, error) {
-	panic("TODO")
+// determineArchiveFormat checks the archive format using the file magic, Content-Type and the URL suffix
+func determineArchiveFormat(filePath string, resp *http.Response, originalURL string) (string, error) {
+	// check magic
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	header := make([]byte, 4)
+	_, err = file.Read(header)
+	if err != nil && err != io.EOF {
+		return "", err
+	}
+
+	if bytes.Equal(header, []byte{0x50, 0x4b, 0x03, 0x04}) {
+		return "zip", nil
+	}
+	if bytes.Equal(header[:2], []byte{0x1f, 0x8b}) {
+		return "tar.gz", nil
+	}
+
+	// fallback to mimetype
+	contentType := resp.Header.Get("Content-Type")
+	switch contentType {
+	case "application/zip", "application/x-zip-compressed":
+		return "zip", nil
+	case "application/gzip", "application/x-gzip", "application/x-tar":
+		return "tar.gz", nil
+	}
+
+	// fallback to URL suffix
+	u, err := url.Parse(originalURL)
+	if err == nil {
+		ext := path.Ext(u.Path)
+		switch ext {
+		case ".zip":
+			return "zip", nil
+		case ".tgz", ".tar.gz":
+			return "tar.gz", nil
+		}
+	}
+
+	return "", errors.New("unknown or unsupported archive format")
+}
+
+// downloadAndExtractArchive downloads and extracts an archive
+func downloadAndExtractArchive(downloadURL, toWhere string) (string, error) {
+	cleanURL := downloadURL
+	var expectedMD5 string
+	if parts := strings.SplitN(downloadURL, "#MD5=", 2); len(parts) == 2 {
+		cleanURL = parts[0]
+		expectedMD5 = parts[1]
+	}
+
+	resp, err := http.Get(cleanURL)
+	if err != nil {
+		return "", fmt.Errorf("failed to download from url %s: %w", cleanURL, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download from url %s: status code %d", cleanURL, resp.StatusCode)
+	}
+
+	tmpFile, err := os.CreateTemp(toWhere, "archive-*.tmp")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temporary file: %w", err)
+	}
+	archivePath := tmpFile.Name()
+	defer os.Remove(archivePath)
+
+	hash := md5.New()
+	writer := io.MultiWriter(tmpFile, hash)
+
+	_, err = io.Copy(writer, resp.Body)
+	if err != nil {
+		tmpFile.Close()
+		return "", fmt.Errorf("failed to write to temporary file: %w", err)
+	}
+	if err := tmpFile.Close(); err != nil {
+		return "", fmt.Errorf("failed to close temporary file: %w", err)
+	}
+
+	if expectedMD5 != "" {
+		calculatedMD5 := hex.EncodeToString(hash.Sum(nil))
+		if !strings.EqualFold(expectedMD5, calculatedMD5) {
+			return "", fmt.Errorf("MD5 checksum mismatch for %s: expected %s, got %s", cleanURL, expectedMD5, calculatedMD5)
+		}
+	}
+
+	format, err := determineArchiveFormat(archivePath, resp, downloadURL)
+	if err != nil {
+		return "", err
+	}
+
+	var extractErr error
+	switch format {
+	case "zip":
+		extractErr = unzip(archivePath, toWhere)
+	case "tar.gz":
+		extractErr = untar(archivePath, toWhere)
+	}
+
+	if extractErr != nil {
+		return "", fmt.Errorf("failed to extract archive: %w", extractErr)
+	}
+
+	return toWhere, nil
+}
+
+// unzip extracts a zip archive to a destination directory
+func unzip(src, dest string) error {
+	r, err := zip.OpenReader(src)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	var rootDir string
+	if len(r.File) > 0 {
+		firstPath := r.File[0].Name
+		isSingleRoot := true
+		if r.File[0].FileInfo().IsDir() {
+			rootDir = firstPath
+			for _, f := range r.File {
+				if !strings.HasPrefix(f.Name, rootDir) {
+					isSingleRoot = false
+					break
+				}
+			}
+		} else {
+			isSingleRoot = false
+		}
+		if !isSingleRoot {
+			rootDir = ""
+		}
+	}
+
+	for _, f := range r.File {
+		name := f.Name
+		if rootDir != "" {
+			name = strings.TrimPrefix(name, rootDir)
+		}
+		if name == "" {
+			continue
+		}
+
+		fpath := filepath.Join(dest, name)
+
+		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", fpath)
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(fpath, os.ModePerm)
+			continue
+		}
+
+		if err = os.MkdirAll(filepath.Dir(fpath), os.ModePerm); err != nil {
+			return err
+		}
+
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, rc)
+		outFile.Close()
+		rc.Close()
+
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// untar extracts a tar.gz archive to a destination directory
+func untar(src, dest string) error {
+	file, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	gzr, err := gzip.NewReader(file)
+	if err != nil {
+		return err
+	}
+	defer gzr.Close()
+
+	tr := tar.NewReader(gzr)
+
+	var rootDir string
+	firstEntry := true
+
+	for {
+		header, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+
+		if firstEntry {
+			if header.Typeflag == tar.TypeDir {
+				rootDir = header.Name
+			}
+			firstEntry = false
+		} else {
+			if rootDir != "" && !strings.HasPrefix(header.Name, rootDir) {
+				rootDir = ""
+			}
+		}
+
+		name := header.Name
+		if rootDir != "" {
+			name = strings.TrimPrefix(name, rootDir)
+		}
+		if name == "" {
+			continue
+		}
+
+		target := filepath.Join(dest, name)
+		if !strings.HasPrefix(target, filepath.Clean(dest)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", target)
+		}
+
+		switch header.Typeflag {
+		case tar.TypeDir:
+			if _, err := os.Stat(target); err != nil {
+				if err := os.MkdirAll(target, 0755); err != nil {
+					return err
+				}
+			}
+		case tar.TypeReg:
+			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+				return err
+			}
+			f, err := os.OpenFile(target, os.O_CREATE|os.O_RDWR, os.FileMode(header.Mode))
+			if err != nil {
+				return err
+			}
+			_, err = io.Copy(f, tr)
+			f.Close()
+			if err != nil {
+				return err
+			}
+		}
+	}
 }
