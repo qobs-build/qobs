@@ -1,7 +1,7 @@
 [package]
 name = "platform-define"
-description = "This is where I make a project."
-authors = ["AzureDiamond"]
+description = "Demo of [target] expressions"
+authors = ["zeozeozeo"]
 
 [target]
 sources = ["src/**.cpp", "src/**.cc", "src/**.c"]

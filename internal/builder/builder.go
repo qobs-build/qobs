@@ -265,6 +265,10 @@ func (b *Builder) Build() error {
 			}
 		}
 
+		for _, lib := range pkg.Config.Target.Links {
+			ldflags = append(cflags, `-l`+lib)
+		}
+
 		g.AddTarget(
 			pkg.outputName(),
 			pkg.Path,

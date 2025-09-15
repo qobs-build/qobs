@@ -3,9 +3,10 @@ package builder
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
-	"maps"
 	"os"
+	"reflect"
 	"runtime"
 
 	"github.com/expr-lang/expr"
@@ -32,29 +33,118 @@ type TargetSection struct {
 	Sources []string          `toml:"sources"`
 	Headers []string          `toml:"headers"`
 	Defines map[string]string `toml:"defines"`
+	Links   []string          `toml:"links"`
 }
 
-func (t *TargetSection) merge(other TargetSection) {
-	t.Lib = t.Lib || other.Lib
-	t.Sources = append(t.Sources, other.Sources...)
-	t.Headers = append(t.Headers, other.Headers...)
-	if t.Defines == nil {
-		t.Defines = make(map[string]string)
+// mergeStructs merges the fields of the src struct into the dst struct
+func mergeStructs(dst, src any) error {
+	dstVal := reflect.ValueOf(dst)
+	if dstVal.Kind() != reflect.Ptr || dstVal.Elem().Kind() != reflect.Struct {
+		return fmt.Errorf("dst must be a pointer to a struct")
 	}
-	maps.Copy(t.Defines, other.Defines)
+
+	dstElem := dstVal.Elem()
+	srcVal := reflect.ValueOf(src)
+
+	if srcVal.Kind() == reflect.Ptr {
+		srcVal = srcVal.Elem()
+	}
+
+	if srcVal.Kind() != reflect.Struct {
+		return fmt.Errorf("src must be a struct or a pointer to a struct")
+	}
+
+	if dstElem.Type() != srcVal.Type() {
+		return fmt.Errorf("dst and src must be of the same struct type")
+	}
+
+	for i := 0; i < srcVal.NumField(); i++ {
+		srcField := srcVal.Field(i)
+		dstField := dstElem.Field(i)
+
+		if !dstField.CanSet() {
+			continue
+		}
+
+		switch dstField.Kind() {
+		case reflect.Slice:
+			if !srcField.IsNil() {
+				dstField.Set(reflect.AppendSlice(dstField, srcField))
+			}
+		case reflect.Map:
+			if !srcField.IsNil() {
+				if dstField.IsNil() {
+					dstField.Set(reflect.MakeMap(dstField.Type()))
+				}
+				for _, key := range srcField.MapKeys() {
+					dstField.SetMapIndex(key, srcField.MapIndex(key))
+				}
+			}
+		case reflect.Bool:
+			dstField.SetBool(dstField.Bool() || srcField.Bool())
+		default:
+			if !srcField.IsZero() {
+				dstField.Set(srcField)
+			}
+		}
+	}
+
+	return nil
+}
+
+func mustMarshal(v any) string {
+	b, err := toml.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
 }
 
 // ParseConfig parses and validates a config file from a reader
 func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
+	var rawConfig map[string]any
 	dec := toml.NewDecoder(rdr)
-	dec.DisallowUnknownFields()
-	cfg := new(Config)
-
-	if err := dec.Decode(cfg); err != nil {
+	if err := dec.Decode(&rawConfig); err != nil {
 		if derr, ok := err.(*toml.DecodeError); ok {
 			return nil, errors.New(derr.String())
 		}
 		return nil, err
+	}
+
+	cfg := new(Config)
+
+	// TODO: this is fucking ugly, idk if we can use reflection for the expression thing
+	if pkg, ok := rawConfig["package"]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(pkg)), &cfg.Package); err != nil {
+			return nil, err
+		}
+	}
+	if deps, ok := rawConfig["dependencies"]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(deps)), &cfg.Dependencies); err != nil {
+			return nil, err
+		}
+	}
+
+	if targetData, ok := rawConfig["target"]; ok {
+		targetMap, ok := targetData.(map[string]any)
+		if !ok {
+			return nil, errors.New("invalid [target] section format")
+		}
+
+		if err := toml.Unmarshal([]byte(mustMarshal(targetMap)), &cfg.Target); err != nil {
+			return nil, err
+		}
+
+		cfg.RawTarget = make(map[string]TargetSection)
+		for key, val := range targetMap {
+			if _, isMap := val.(map[string]any); isMap {
+				var conditionalTarget TargetSection
+				if err := toml.Unmarshal([]byte(mustMarshal(val)), &conditionalTarget); err != nil {
+					return nil, err
+				}
+				cfg.RawTarget[key] = conditionalTarget
+			}
+		}
 	}
 
 	if len(cfg.RawTarget) > 0 {
@@ -94,7 +184,9 @@ func (cfg *Config) evaluate(env map[string]any) error {
 		}
 
 		// merge the sections
-		cfg.Target.merge(target)
+		if err := mergeStructs(&cfg.Target, target); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -1,0 +1,10 @@
+[package]
+name = "gdi-triangle"
+description = "Win32 GDI triangle"
+authors = ["zeozeozeo"]
+
+[target]
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+
+[target.'target_os == "windows"']
+links = ['gdi32']

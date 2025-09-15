@@ -97,12 +97,12 @@ func (g *NinjaGen) Generate() string {
 `)
 	write(&sb,
 		`rule link
-  command = $cc $ldflags -o $out $in
+  command = $cc -o $out $in $ldflags
   description = LINK $out
 `)
 	write(&sb,
 		`rule linkxx
-  command = $cxx $ldflags -o $out $in
+  command = $cxx -o $out $in $ldflags
   description = LINK $out
 `)
 	write(&sb,
