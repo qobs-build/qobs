@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 
 	"github.com/zeozeozeo/qobs/internal/msg"
 	"golang.org/x/sync/errgroup"
@@ -330,7 +329,7 @@ func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
 			queue = append(queue, name)
 		}
 	}
-	sort.Strings(queue)
+	slices.Sort(queue)
 
 	var sortedOrder []string
 
@@ -339,7 +338,7 @@ func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
 		queue = queue[1:]
 		sortedOrder = append(sortedOrder, u)
 
-		sort.Strings(graph[u])
+		slices.Sort(graph[u])
 
 		// for each target v that depends on u
 		for _, v := range graph[u] {
@@ -359,7 +358,7 @@ func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
 				cycleNodes = append(cycleNodes, name)
 			}
 		}
-		sort.Strings(cycleNodes)
+		slices.Sort(cycleNodes)
 		return nil, fmt.Errorf("dependency cycle detected involving targets: %v", cycleNodes)
 	}
 
