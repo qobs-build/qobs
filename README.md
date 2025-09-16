@@ -35,6 +35,22 @@ libhelloworld = "gh:zeozeozeo/libhelloworld"
 
 ([see more examples](/_examples/))
 
+The CLI is intuitive:
+
+```console
+$ qobs new hello-world
+Created file: hello-world/Qobs.toml
+Created file: hello-world/src/main.c
+Created file: hello-world/.gitignore
+
+$ cd hello-world
+$ qobs build .  # or just "qobs ."
+...
+$ qobs run .
+qobs: no work to do.
+Hello, World!
+```
+
 It currently supports the following build systems:
 
 - Its own. Qobs can build the code in parallel itself, without any project generator
