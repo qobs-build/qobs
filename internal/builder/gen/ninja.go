@@ -16,18 +16,19 @@ type sourceFile struct {
 	isCxx bool // C++ file
 }
 
-// ninjaTarget represents a single unit to be built (a library or an executable)
-type ninjaTarget struct {
+// buildUnit represents a single unit to be built (a library or an executable)
+type buildUnit struct {
 	name            string
 	isLib           bool
 	sources         []sourceFile
 	dependencies    []string
-	cflags, ldflags string
+	cflags, ldflags []string
+	basedir         string
 }
 
 type NinjaGen struct {
 	cc, cxx string
-	targets map[string]ninjaTarget
+	targets map[string]buildUnit
 }
 
 func (g *NinjaGen) SetCompiler(cc, cxx string) {
@@ -41,9 +42,9 @@ var ninjaPathEscaper = strings.NewReplacer(":", "$:", " ", "$ ")
 func quote(s string) string { return ninjaPathEscaper.Replace(s) }
 
 // AddTarget adds a package (library or executable) to the build graph
-func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags string) {
+func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
 	if g.targets == nil {
-		g.targets = make(map[string]ninjaTarget)
+		g.targets = make(map[string]buildUnit)
 	}
 
 	targetSources := make([]sourceFile, len(sources))
@@ -58,7 +59,7 @@ func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []strin
 		targetSources[i] = sourceFile{src: srcPath, obj: objPath, isCxx: isCxx(srcPath)}
 	}
 
-	g.targets[name] = ninjaTarget{
+	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,
 		sources:      targetSources,
@@ -122,7 +123,7 @@ func (g *NinjaGen) Generate() string {
 			} else {
 				writeln(&sb, "build ", source.obj, ": cc ", quote(source.src))
 			}
-			writeln(&sb, "  cflags = ", target.cflags)
+			writeln(&sb, "  cflags = ", strings.Join(target.cflags, " "))
 		}
 	}
 
@@ -145,7 +146,7 @@ func (g *NinjaGen) Generate() string {
 			write(&sb, " ", dep)
 		}
 		writeln(&sb)
-		writeln(&sb, "  ldflags = ", target.ldflags)
+		writeln(&sb, "  ldflags = ", strings.Join(target.ldflags, " "))
 	}
 
 	return sb.String()

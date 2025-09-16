@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/zeozeozeo/qobs/internal/builder/gen"
@@ -125,7 +124,7 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 		}
 
 		if depConfig.Package.Name != depName {
-			msg.Warn("dependency '%s' has a mismatched package name: `%s`", depName, depConfig.Package.Name)
+			msg.Warn("dependency `%s` has a mismatched package name: `%s`", depName, depConfig.Package.Name)
 		}
 
 		depPkg := &Package{
@@ -205,7 +204,12 @@ func (b *Builder) Build() error {
 		return fmt.Errorf("failed to resolve dependency graph: %w", err)
 	}
 
-	g := &gen.NinjaGen{}
+	var g gen.Generator
+	if os.Getenv("QOBS_USE_OWN_BUILDER") != "" {
+		g = gen.NewGoBuilder()
+	} else {
+		g = &gen.NinjaGen{}
+	}
 	var rootPkg *Package
 
 	// add targets
@@ -232,7 +236,7 @@ func (b *Builder) Build() error {
 
 		// add own include paths to cflags
 		for _, includePath := range ownHeaders {
-			cflags = append(cflags, `-I"`+includePath+`"`)
+			cflags = append(cflags, "-I"+includePath)
 		}
 
 		for depName := range pkg.Config.Dependencies {
@@ -245,13 +249,12 @@ func (b *Builder) Build() error {
 			}
 			depOutputs = append(depOutputs, dep.outputName())
 
-			// Collect and add dependency header paths to cflags
 			depHeaders, err := b.collectFiles(dep, dep.Config.Target.Headers, true)
 			if err != nil {
 				return fmt.Errorf("failed to collect headers for dependency %s: %w", dep.Name, err)
 			}
 			for _, includePath := range depHeaders {
-				cflags = append(cflags, `-I"`+includePath+`"`)
+				cflags = append(cflags, "-I"+includePath)
 			}
 		}
 
@@ -266,7 +269,7 @@ func (b *Builder) Build() error {
 		}
 
 		for _, lib := range pkg.Config.Target.Links {
-			ldflags = append(cflags, `-l`+lib)
+			ldflags = append(ldflags, `-l`+lib)
 		}
 
 		g.AddTarget(
@@ -275,8 +278,8 @@ func (b *Builder) Build() error {
 			sources,
 			depOutputs,
 			pkg.Config.Target.Lib,
-			strings.Join(cflags, " "),
-			strings.Join(ldflags, " "),
+			cflags,
+			ldflags,
 		)
 	}
 
@@ -288,9 +291,11 @@ func (b *Builder) Build() error {
 	g.SetCompiler(findCompiler(false), findCompiler(true))
 
 	out := g.Generate()
-	buildFile := filepath.Join(buildDir, g.BuildFile())
-	if err = os.WriteFile(buildFile, []byte(out), 0644); err != nil {
-		return err
+	if out != "" {
+		buildFile := filepath.Join(buildDir, g.BuildFile())
+		if err = os.WriteFile(buildFile, []byte(out), 0644); err != nil {
+			return err
+		}
 	}
 
 	if err := g.Invoke(buildDir); err != nil {

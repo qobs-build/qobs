@@ -1,10 +1,9 @@
 package gen
 
 type Generator interface {
-	SetFiles(files []string, basedir string)
-	SetCompiler(cflags, ldflags, cc string)
-	SetOutput(binname string)
+	SetCompiler(cc, cxx string)
+	AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string)
 	Generate() string
 	BuildFile() string
-	Invoke(path string) error
+	Invoke(buildDir string) error
 }
