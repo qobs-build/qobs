@@ -26,7 +26,6 @@ var defaultProfiles = map[string]ProfileSection{
 
 type Config struct {
 	Package      PackageSection            `toml:"package"`
-	RawTarget    map[string]TargetSection  `toml:"target"`
 	Target       TargetSection             `toml:"target"`
 	Dependencies map[string]string         `toml:"dependencies"`
 	Profile      map[string]ProfileSection `toml:"profile"`
@@ -157,7 +156,65 @@ func mustMarshal(v any) string {
 	return string(b)
 }
 
-// ParseConfig parses and validates a config file from a reader
+// unmarshalSection is a helper to parse sections without conditional logic
+func unmarshalSection(rawCfg map[string]any, name string, dst any) error {
+	if data, ok := rawCfg[name]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(data)), dst); err != nil {
+			return fmt.Errorf("failed to parse [%s] section: %w", name, err)
+		}
+	}
+	return nil
+}
+
+// unmarshalSection is a helper to parse, evaluate and merge multiple sections with conditional logic
+func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst *T, env map[string]any) error {
+	sectionData, ok := rawCfg[name]
+	if !ok {
+		return nil
+	}
+
+	sectionMap, ok := sectionData.(map[string]any)
+	if !ok {
+		return fmt.Errorf("invalid [%s] section format: expected a table", name)
+	}
+
+	if err := toml.Unmarshal([]byte(mustMarshal(sectionMap)), dst); err != nil {
+		return fmt.Errorf("failed to parse base [%s] section: %w", name, err)
+	}
+
+	for expression, val := range sectionMap {
+		condMap, isMap := val.(map[string]any)
+		if !isMap {
+			continue
+		}
+
+		program, err := expr.Compile(expression, expr.Env(env))
+		if err != nil {
+			return fmt.Errorf("failed to compile expression for [%s.%q]: %w", name, expression, err)
+		}
+
+		result, err := expr.Run(program, env)
+		if err != nil {
+			return fmt.Errorf("failed to run expression for [%s.%q]: %w", name, expression, err)
+		}
+
+		// merge sections if result is true
+		if matched, ok := result.(bool); !ok || !matched {
+			continue
+		}
+
+		var condSection T
+		if err := toml.Unmarshal([]byte(mustMarshal(condMap)), &condSection); err != nil {
+			return fmt.Errorf("failed to parse conditional section [%s.%q]: %w", name, expression, err)
+		}
+		if err := mergeStructs(dst, condSection); err != nil {
+			return fmt.Errorf("failed to merge conditional section [%s.%q]: %w", name, expression, err)
+		}
+	}
+
+	return nil
+}
+
 func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 	var rawConfig map[string]any
 	dec := toml.NewDecoder(rdr)
@@ -171,49 +228,17 @@ func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 	cfg := new(Config)
 	cfg.Profile = defaultProfiles
 
-	// FIXME: HACK: this is fucking ugly, we can use reflection for the expression thing
-	if v, ok := rawConfig["package"]; ok {
-		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Package); err != nil {
-			return nil, err
-		}
+	if err := unmarshalSection(rawConfig, "package", &cfg.Package); err != nil {
+		return nil, err
 	}
-	if v, ok := rawConfig["dependencies"]; ok {
-		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Dependencies); err != nil {
-			return nil, err
-		}
+	if err := unmarshalConditionalSection(rawConfig, "dependencies", &cfg.Dependencies, env); err != nil {
+		return nil, err
 	}
-	if v, ok := rawConfig["profile"]; ok {
-		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Profile); err != nil {
-			return nil, err
-		}
+	if err := unmarshalConditionalSection(rawConfig, "profile", &cfg.Profile, env); err != nil {
+		return nil, err
 	}
-
-	if targetData, ok := rawConfig["target"]; ok {
-		targetMap, ok := targetData.(map[string]any)
-		if !ok {
-			return nil, errors.New("invalid [target] section format")
-		}
-
-		if err := toml.Unmarshal([]byte(mustMarshal(targetMap)), &cfg.Target); err != nil {
-			return nil, err
-		}
-
-		cfg.RawTarget = make(map[string]TargetSection)
-		for key, val := range targetMap {
-			if _, isMap := val.(map[string]any); isMap {
-				var conditionalTarget TargetSection
-				if err := toml.Unmarshal([]byte(mustMarshal(val)), &conditionalTarget); err != nil {
-					return nil, err
-				}
-				cfg.RawTarget[key] = conditionalTarget
-			}
-		}
-	}
-
-	if len(cfg.RawTarget) > 0 {
-		if err := cfg.evaluate(env); err != nil {
-			return nil, err
-		}
+	if err := unmarshalConditionalSection(rawConfig, "target", &cfg.Target, env); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
@@ -228,30 +253,6 @@ func ParseConfigFromFile(path string, env map[string]any) (*Config, error) {
 	defer f.Close()
 
 	return ParseConfig(bufio.NewReader(f), env)
-}
-
-func (cfg *Config) evaluate(env map[string]any) error {
-	for expression, target := range cfg.RawTarget {
-		program, err := expr.Compile(expression, expr.Env(env))
-		if err != nil {
-			return err
-		}
-
-		result, err := expr.Run(program, env)
-		if err != nil {
-			return err
-		}
-
-		if matched, ok := result.(bool); !ok || !matched {
-			continue
-		}
-
-		// merge the sections
-		if err := mergeStructs(&cfg.Target, target); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func NewConfigEnv() map[string]any {
