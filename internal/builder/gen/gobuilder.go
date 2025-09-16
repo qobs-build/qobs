@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"sort"
 
 	"github.com/zeozeozeo/qobs/internal/msg"
 	"golang.org/x/sync/errgroup"
@@ -37,6 +38,7 @@ type compileJob struct {
 
 // linkJob represents a linking job
 type linkJob struct {
+	name    string
 	objs    []string
 	deps    []string
 	out     string
@@ -53,6 +55,7 @@ type GoBuilder struct {
 	stateFile  string
 	buildState map[string]*BuildState
 	jobs       int
+	hashCache  map[string]string
 }
 
 func NewGoBuilder() *GoBuilder {
@@ -60,6 +63,7 @@ func NewGoBuilder() *GoBuilder {
 		targets:    make(map[string]buildUnit),
 		buildState: make(map[string]*BuildState),
 		jobs:       runtime.NumCPU(),
+		hashCache:  make(map[string]string),
 	}
 }
 
@@ -109,10 +113,23 @@ func (g *GoBuilder) Invoke(buildDir string) error {
 		msg.Warn("failed to load build state: %v", err)
 	}
 
-	for _, target := range g.targets {
-		if err := g.buildTarget(target); err != nil {
-			return fmt.Errorf("failed to build target %s: %w", target.name, err)
-		}
+	sortedTargetNames, err := g.topologicalSortTargets()
+	if err != nil {
+		return err
+	}
+
+	compileJobs, linkJobs, err := g.planBuild(sortedTargetNames)
+	if err != nil {
+		return fmt.Errorf("build planning failed: %w", err)
+	}
+
+	if len(compileJobs) == 0 && len(linkJobs) == 0 {
+		fmt.Println("qobs: no work to do.")
+		return nil
+	}
+
+	if err := g.executeBuild(compileJobs, linkJobs); err != nil {
+		return err
 	}
 
 	if err := g.saveBuildState(); err != nil {
@@ -120,6 +137,233 @@ func (g *GoBuilder) Invoke(buildDir string) error {
 	}
 
 	return nil
+}
+
+// planBuild determines which compile and link jobs are necessary
+func (g *GoBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []compileJob, allLinkJobs []linkJob, err error) {
+	rebuiltTargets := make(map[string]bool)
+
+	for _, targetName := range sortedTargetNames {
+		target := g.targets[targetName]
+		oldState := g.buildState[targetName]
+		needsRelink := false
+
+		// reason 1 for relink: output file is missing
+		outputPath := filepath.Join(g.buildDir, target.name)
+		if _, err := os.Stat(outputPath); os.IsNotExist(err) {
+			needsRelink = true
+		}
+
+		// reason 2 for relink: flags have changed
+		if oldState != nil && (!slices.Equal(oldState.Cflags, target.cflags) || !slices.Equal(oldState.Ldflags, target.ldflags)) {
+			needsRelink = true
+		}
+
+		// reason 3 for relink: a dependency was rebuilt
+		for _, depName := range target.dependencies {
+			if rebuiltTargets[depName] {
+				needsRelink = true
+				break
+			}
+			depPath := filepath.Join(g.buildDir, depName)
+			hash, err := g.fileHash(depPath)
+			if err != nil {
+				if os.IsNotExist(err) {
+					needsRelink = true
+					break
+				}
+				return nil, nil, fmt.Errorf("failed to hash dependency %s: %w", depName, err)
+			}
+			if oldState == nil || oldState.Dependencies[depName] != hash {
+				needsRelink = true
+				break
+			}
+		}
+
+		// determine which source files in this target are dirty
+		var targetCompileJobs []compileJob
+		for _, src := range target.sources {
+			objPath := filepath.Join(g.buildDir, src.obj)
+
+			// check if source is dirty
+			isDirty, err := g.isSourceFileDirty(src, objPath, oldState)
+			if err != nil {
+				return nil, nil, fmt.Errorf("could not check status of %s: %w", src.src, err)
+			}
+			if isDirty {
+				compiler := g.cc
+				if src.isCxx {
+					compiler = g.cxx
+				}
+				targetCompileJobs = append(targetCompileJobs, compileJob{
+					src:    src.src,
+					obj:    objPath,
+					cflags: target.cflags,
+					isCxx:  src.isCxx,
+					cc:     compiler,
+				})
+			}
+		}
+
+		// reason 4 for relink: one or more of its source files were recompiled
+		if len(targetCompileJobs) > 0 {
+			allCompileJobs = append(allCompileJobs, targetCompileJobs...)
+			needsRelink = true
+		}
+
+		if needsRelink {
+			rebuiltTargets[target.name] = true
+			linkJob, err := g.createLinkJob(target)
+			if err != nil {
+				return nil, nil, err
+			}
+			allLinkJobs = append(allLinkJobs, linkJob)
+		}
+	}
+
+	return allCompileJobs, allLinkJobs, nil
+}
+
+// executeBuild runs the planned compile and link jobs and updates the build state
+func (g *GoBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) error {
+	if err := runJobs(compileJobs, runCompileJob, g.jobs); err != nil {
+		return fmt.Errorf("compilation failed: %w", err)
+	}
+	if err := runJobs(linkJobs, runLinkJob, g.jobs); err != nil {
+		return fmt.Errorf("linking failed: %w", err)
+	}
+
+	for _, job := range linkJobs {
+		target, ok := g.targets[job.name]
+		if !ok {
+			continue
+		}
+		if err := g.updateBuildState(target); err != nil {
+			msg.Warn("failed to update build state for target %s: %v", target.name, err)
+		}
+	}
+
+	return nil
+}
+
+// isSourceFileDirty checks if a single source file needs to be recompiled
+func (g *GoBuilder) isSourceFileDirty(src sourceFile, objPath string, state *BuildState) (bool, error) {
+	if _, err := os.Stat(objPath); os.IsNotExist(err) {
+		return true, nil
+	}
+
+	if state == nil {
+		return true, nil
+	}
+
+	hash, err := g.fileHash(src.src)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, fmt.Errorf("source file %s not found", src.src)
+		}
+		return true, err
+	}
+	if prevHash, exists := state.Sources[src.src]; !exists || prevHash != hash {
+		return true, nil
+	}
+
+	return false, nil
+}
+
+// createLinkJob constructs a linkJob for a given buildUnit
+func (g *GoBuilder) createLinkJob(target buildUnit) (linkJob, error) {
+	objects := make([]string, len(target.sources))
+	for i, src := range target.sources {
+		objects[i] = filepath.Join(g.buildDir, src.obj)
+	}
+
+	dependencies := make([]string, len(target.dependencies))
+	for i, dep := range target.dependencies {
+		dependencies[i] = filepath.Join(g.buildDir, dep)
+	}
+
+	isCxx := g.hasCxxInTarget(target)
+	var linker string
+	if isCxx {
+		linker = g.cxx
+	} else {
+		linker = g.cc
+	}
+
+	return linkJob{
+		name:    target.name,
+		objs:    objects,
+		deps:    dependencies,
+		out:     filepath.Join(g.buildDir, target.name),
+		ldflags: target.ldflags,
+		isLib:   target.isLib,
+		isCxx:   isCxx,
+		cc:      linker,
+	}, nil
+}
+
+func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
+	graph := make(map[string][]string) // target -> targets that depend on it
+	inDegree := make(map[string]int)   // target -> dependency count
+
+	for name := range g.targets {
+		graph[name] = []string{}
+		inDegree[name] = 0
+	}
+
+	// build graph
+	for name, target := range g.targets {
+		for _, depName := range target.dependencies {
+			if _, ok := g.targets[depName]; !ok {
+				return nil, fmt.Errorf("target `%s` lists a non-existent dependency: `%s`", name, depName)
+			}
+
+			graph[depName] = append(graph[depName], name)
+			inDegree[name]++
+		}
+	}
+
+	// queue of targets with indegree of 0
+	var queue []string
+	for name, degree := range inDegree {
+		if degree == 0 {
+			queue = append(queue, name)
+		}
+	}
+	sort.Strings(queue)
+
+	var sortedOrder []string
+
+	for len(queue) > 0 {
+		u := queue[0]
+		queue = queue[1:]
+		sortedOrder = append(sortedOrder, u)
+
+		sort.Strings(graph[u])
+
+		// for each target v that depends on u
+		for _, v := range graph[u] {
+			inDegree[v]--
+			// if v no longer has any unmet dependencies, add it to the queue
+			if inDegree[v] == 0 {
+				queue = append(queue, v)
+			}
+		}
+	}
+
+	// check cycles
+	if len(sortedOrder) != len(g.targets) {
+		var cycleNodes []string
+		for name, degree := range inDegree {
+			if degree > 0 {
+				cycleNodes = append(cycleNodes, name)
+			}
+		}
+		sort.Strings(cycleNodes)
+		return nil, fmt.Errorf("dependency cycle detected involving targets: %v", cycleNodes)
+	}
+
+	return sortedOrder, nil
 }
 
 // loadBuildState loads the previous build state from disk
@@ -145,8 +389,12 @@ func (g *GoBuilder) saveBuildState() error {
 	return os.WriteFile(g.stateFile, data, 0644)
 }
 
-// fileHash computes the SHA256 hash of a file
-func fileHash(path string) (string, error) {
+// fileHash computes the SHA256 hash of a file with an in-memory cache
+func (g *GoBuilder) fileHash(path string) (string, error) {
+	if hash, ok := g.hashCache[path]; ok {
+		return hash, nil
+	}
+
 	file, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -158,128 +406,9 @@ func fileHash(path string) (string, error) {
 		return "", err
 	}
 
-	return hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// needsRebuild checks if a target needs to be rebuilt
-func (g *GoBuilder) needsRebuild(target buildUnit) (bool, error) {
-	state, exists := g.buildState[target.name]
-	if !exists {
-		return true, nil // no build state
-	}
-
-	// check if flags changed
-	if !slices.Equal(state.Cflags, target.cflags) || !slices.Equal(state.Ldflags, target.ldflags) {
-		return true, nil
-	}
-
-	// check if output exists
-	outputPath := filepath.Join(g.buildDir, target.name)
-	if _, err := os.Stat(outputPath); os.IsNotExist(err) {
-		return true, nil
-	}
-
-	// check hashes
-	for _, src := range target.sources {
-		hash, err := fileHash(src.src)
-		if err != nil {
-			return true, err
-		}
-
-		if prevHash, exists := state.Sources[src.src]; !exists || prevHash != hash {
-			return true, nil
-		}
-	}
-
-	// check dependency hashes
-	for _, dep := range target.dependencies {
-		depPath := filepath.Join(g.buildDir, dep)
-		hash, err := fileHash(depPath)
-		if err != nil {
-			return true, err
-		}
-
-		if prevHash, exists := state.Dependencies[dep]; !exists || prevHash != hash {
-			return true, nil
-		}
-	}
-
-	return false, nil
-}
-
-// buildTarget builds a single target
-func (g *GoBuilder) buildTarget(target buildUnit) error {
-	needsRebuild, err := g.needsRebuild(target)
-	if err != nil {
-		return err
-	}
-
-	if !needsRebuild {
-		return nil
-	}
-
-	objDir := filepath.Join(g.buildDir, "QobsFiles", target.name+".dir")
-	if err := os.MkdirAll(objDir, 0755); err != nil {
-		return fmt.Errorf("failed to create object directory: %w", err)
-	}
-
-	// compile sources
-	compileJobs := make([]compileJob, len(target.sources))
-
-	for i, src := range target.sources {
-		objPath := filepath.Join(g.buildDir, src.obj)
-		compiler := g.cc
-		if src.isCxx {
-			compiler = g.cxx
-		}
-
-		compileJobs[i] = compileJob{
-			src:    src.src,
-			obj:    objPath,
-			cflags: target.cflags,
-			isCxx:  src.isCxx,
-			cc:     compiler,
-		}
-	}
-
-	if err := g.runCompileJobs(compileJobs); err != nil {
-		return err
-	}
-
-	// link
-	objects := make([]string, len(target.sources))
-	for i, src := range target.sources {
-		objects[i] = filepath.Join(g.buildDir, src.obj)
-	}
-
-	dependencies := make([]string, len(target.dependencies))
-	for i, dep := range target.dependencies {
-		dependencies[i] = filepath.Join(g.buildDir, dep)
-	}
-
-	outputPath := filepath.Join(g.buildDir, target.name)
-	linkJob := linkJob{
-		objs:    objects,
-		deps:    dependencies,
-		out:     outputPath,
-		ldflags: target.ldflags,
-		isLib:   target.isLib,
-		isCxx:   g.hasCxxInTarget(target),
-		cc:      g.cc,
-	}
-	if linkJob.isCxx {
-		linkJob.cc = g.cxx
-	}
-
-	if err := g.runLinkJob(linkJob); err != nil {
-		return err
-	}
-
-	if err := g.updateBuildState(target); err != nil {
-		return err
-	}
-
-	return nil
+	hexHash := hex.EncodeToString(hash.Sum(nil))
+	g.hashCache[path] = hexHash
+	return hexHash, nil
 }
 
 // hasCxxInTarget checks if target or its dependencies have C++ sources
@@ -290,12 +419,11 @@ func (g *GoBuilder) hasCxxInTarget(target buildUnit) bool {
 		}
 	}
 
+	// TODO: cache this?
 	for _, depName := range target.dependencies {
 		if depTarget, exists := g.targets[depName]; exists {
-			for _, src := range depTarget.sources {
-				if src.isCxx {
-					return true
-				}
+			if g.hasCxxInTarget(depTarget) {
+				return true
 			}
 		}
 	}
@@ -303,18 +431,18 @@ func (g *GoBuilder) hasCxxInTarget(target buildUnit) bool {
 	return false
 }
 
-// runCompileJobs runs compilation jobs in parallel
-func (g *GoBuilder) runCompileJobs(jobs []compileJob) error {
+// runJobs runs jobs in parallel
+func runJobs[T any](jobs []T, jobfunc func(job T) error, limit int) error {
 	if len(jobs) == 0 {
 		return nil
 	}
 
 	eg, _ := errgroup.WithContext(context.Background())
-	eg.SetLimit(g.jobs)
+	eg.SetLimit(limit)
 
 	for _, job := range jobs {
 		eg.Go(func() error {
-			return runCompileJob(job)
+			return jobfunc(job)
 		})
 	}
 
@@ -335,50 +463,47 @@ func runCompileJob(job compileJob) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	fmt.Printf("CC %s\n", job.obj)
+	fmt.Printf("CC %s\n", job.src)
 	return cmd.Run()
 }
 
-// runLinkJob runs a linking job
-func (g *GoBuilder) runLinkJob(job linkJob) error {
+// runLinkJob runs a single linking job
+func runLinkJob(job linkJob) error {
+	var cmd *exec.Cmd
 	if job.isLib {
 		args := []string{"rcs", job.out}
 		args = append(args, job.objs...)
-		args = append(args, job.deps...)
 
-		cmd := exec.Command("ar", args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
+		cmd = exec.Command("ar", args...)
 		fmt.Printf("AR %s\n", job.out)
-		return cmd.Run()
 	} else {
 		args := []string{"-o", job.out}
 		args = append(args, job.objs...)
 		args = append(args, job.deps...)
 		args = append(args, job.ldflags...)
 
-		cmd := exec.Command(job.cc, args...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-
+		cmd = exec.Command(job.cc, args...)
 		fmt.Printf("LINK %s\n", job.out)
-		return cmd.Run()
 	}
+
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
 
-// updateBuildState updates the build state for a target
+// updateBuildState updates the build state for a target after a successful build
 func (g *GoBuilder) updateBuildState(target buildUnit) error {
 	state := &BuildState{
 		Sources:      make(map[string]string),
 		Dependencies: make(map[string]string),
-		Cflags:       target.cflags,
-		Ldflags:      target.ldflags,
+		Cflags:       slices.Clone(target.cflags),
+		Ldflags:      slices.Clone(target.ldflags),
 	}
 
 	// hash source files
 	for _, src := range target.sources {
-		hash, err := fileHash(src.src)
+		hash, err := g.fileHash(src.src)
 		if err != nil {
 			return fmt.Errorf("failed to hash source file %s: %w", src.src, err)
 		}
@@ -388,9 +513,10 @@ func (g *GoBuilder) updateBuildState(target buildUnit) error {
 	// hash dependencies
 	for _, dep := range target.dependencies {
 		depPath := filepath.Join(g.buildDir, dep)
-		hash, err := fileHash(depPath)
+		hash, err := g.fileHash(depPath)
 		if err != nil {
-			return fmt.Errorf("failed to hash dependency %s: %w", dep, err)
+			msg.Warn("could not hash dependency %s for state update: %v", dep, err)
+			continue
 		}
 		state.Dependencies[dep] = hash
 	}
