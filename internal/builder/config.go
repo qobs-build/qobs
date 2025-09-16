@@ -39,14 +39,14 @@ type TargetSection struct {
 // mergeStructs merges the fields of the src struct into the dst struct
 func mergeStructs(dst, src any) error {
 	dstVal := reflect.ValueOf(dst)
-	if dstVal.Kind() != reflect.Ptr || dstVal.Elem().Kind() != reflect.Struct {
+	if dstVal.Kind() != reflect.Pointer || dstVal.Elem().Kind() != reflect.Struct {
 		return fmt.Errorf("dst must be a pointer to a struct")
 	}
 
 	dstElem := dstVal.Elem()
 	srcVal := reflect.ValueOf(src)
 
-	if srcVal.Kind() == reflect.Ptr {
+	if srcVal.Kind() == reflect.Pointer {
 		srcVal = srcVal.Elem()
 	}
 
@@ -58,7 +58,7 @@ func mergeStructs(dst, src any) error {
 		return fmt.Errorf("dst and src must be of the same struct type")
 	}
 
-	for i := 0; i < srcVal.NumField(); i++ {
+	for i := range srcVal.NumField() {
 		srcField := srcVal.Field(i)
 		dstField := dstElem.Field(i)
 
