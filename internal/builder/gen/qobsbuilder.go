@@ -47,7 +47,7 @@ type linkJob struct {
 	cc      string
 }
 
-type GoBuilder struct {
+type QobsBuilder struct {
 	cc, cxx    string
 	targets    map[string]buildUnit
 	buildDir   string
@@ -57,8 +57,8 @@ type GoBuilder struct {
 	hashCache  map[string]string
 }
 
-func NewGoBuilder() *GoBuilder {
-	return &GoBuilder{
+func NewQobsBuilder() *QobsBuilder {
+	return &QobsBuilder{
 		targets:    make(map[string]buildUnit),
 		buildState: make(map[string]*BuildState),
 		jobs:       runtime.NumCPU(),
@@ -66,16 +66,16 @@ func NewGoBuilder() *GoBuilder {
 	}
 }
 
-func (g *GoBuilder) SetCompiler(cc, cxx string) {
+func (g *QobsBuilder) SetCompiler(cc, cxx string) {
 	g.cc, g.cxx = cc, cxx
 }
 
-func (g *GoBuilder) BuildFile() string {
+func (g *QobsBuilder) BuildFile() string {
 	return "qobs_build_state.json"
 }
 
 // AddTarget adds a package (library or executable) to the build graph
-func (g *GoBuilder) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
+func (g *QobsBuilder) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
 	targetSources := make([]sourceFile, 0, len(sources))
 	for _, srcPath := range sources {
 		rel, err := filepath.Rel(basedir, srcPath)
@@ -99,12 +99,12 @@ func (g *GoBuilder) AddTarget(name, basedir string, sources, dependencies []stri
 	}
 }
 
-func (g *GoBuilder) Generate() string {
+func (g *QobsBuilder) Generate() string {
 	return "" // no build file needed
 }
 
 // Invoke performs the actual build
-func (g *GoBuilder) Invoke(buildDir string) error {
+func (g *QobsBuilder) Invoke(buildDir string) error {
 	g.buildDir = buildDir
 	g.stateFile = filepath.Join(buildDir, g.BuildFile())
 
@@ -139,7 +139,7 @@ func (g *GoBuilder) Invoke(buildDir string) error {
 }
 
 // planBuild determines which compile and link jobs are necessary
-func (g *GoBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []compileJob, allLinkJobs []linkJob, err error) {
+func (g *QobsBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []compileJob, allLinkJobs []linkJob, err error) {
 	rebuiltTargets := make(map[string]bool)
 
 	for _, targetName := range sortedTargetNames {
@@ -224,7 +224,7 @@ func (g *GoBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []comp
 }
 
 // executeBuild runs the planned compile and link jobs and updates the build state
-func (g *GoBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) error {
+func (g *QobsBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) error {
 	if err := runJobs(compileJobs, runCompileJob, g.jobs); err != nil {
 		return fmt.Errorf("compilation failed: %w", err)
 	}
@@ -246,7 +246,7 @@ func (g *GoBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) e
 }
 
 // isSourceFileDirty checks if a single source file needs to be recompiled
-func (g *GoBuilder) isSourceFileDirty(src sourceFile, objPath string, state *BuildState) (bool, error) {
+func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *BuildState) (bool, error) {
 	if _, err := os.Stat(objPath); os.IsNotExist(err) {
 		return true, nil
 	}
@@ -270,7 +270,7 @@ func (g *GoBuilder) isSourceFileDirty(src sourceFile, objPath string, state *Bui
 }
 
 // createLinkJob constructs a linkJob for a given buildUnit
-func (g *GoBuilder) createLinkJob(target buildUnit) (linkJob, error) {
+func (g *QobsBuilder) createLinkJob(target buildUnit) (linkJob, error) {
 	objects := make([]string, len(target.sources))
 	for i, src := range target.sources {
 		objects[i] = filepath.Join(g.buildDir, src.obj)
@@ -301,7 +301,7 @@ func (g *GoBuilder) createLinkJob(target buildUnit) (linkJob, error) {
 	}, nil
 }
 
-func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
+func (g *QobsBuilder) topologicalSortTargets() ([]string, error) {
 	graph := make(map[string][]string) // target -> targets that depend on it
 	inDegree := make(map[string]int)   // target -> dependency count
 
@@ -366,7 +366,7 @@ func (g *GoBuilder) topologicalSortTargets() ([]string, error) {
 }
 
 // loadBuildState loads the previous build state from disk
-func (g *GoBuilder) loadBuildState() error {
+func (g *QobsBuilder) loadBuildState() error {
 	f, err := os.Open(g.stateFile)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -379,7 +379,7 @@ func (g *GoBuilder) loadBuildState() error {
 }
 
 // saveBuildState saves the current build state to disk
-func (g *GoBuilder) saveBuildState() error {
+func (g *QobsBuilder) saveBuildState() error {
 	data, err := json.MarshalIndent(g.buildState, "", "  ")
 	if err != nil {
 		return err
@@ -389,7 +389,7 @@ func (g *GoBuilder) saveBuildState() error {
 }
 
 // fileHash computes the SHA256 hash of a file with an in-memory cache
-func (g *GoBuilder) fileHash(path string) (string, error) {
+func (g *QobsBuilder) fileHash(path string) (string, error) {
 	if hash, ok := g.hashCache[path]; ok {
 		return hash, nil
 	}
@@ -411,7 +411,7 @@ func (g *GoBuilder) fileHash(path string) (string, error) {
 }
 
 // hasCxxInTarget checks if target or its dependencies have C++ sources
-func (g *GoBuilder) hasCxxInTarget(target buildUnit) bool {
+func (g *QobsBuilder) hasCxxInTarget(target buildUnit) bool {
 	for _, src := range target.sources {
 		if src.isCxx {
 			return true
@@ -492,7 +492,7 @@ func runLinkJob(job linkJob) error {
 }
 
 // updateBuildState updates the build state for a target after a successful build
-func (g *GoBuilder) updateBuildState(target buildUnit) error {
+func (g *QobsBuilder) updateBuildState(target buildUnit) error {
 	state := &BuildState{
 		Sources:      make(map[string]string),
 		Dependencies: make(map[string]string),

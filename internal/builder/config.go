@@ -8,16 +8,73 @@ import (
 	"os"
 	"reflect"
 	"runtime"
+	"slices"
+	"strconv"
 
 	"github.com/expr-lang/expr"
 	"github.com/pelletier/go-toml/v2"
 )
 
+var defaultProfiles = map[string]ProfileSection{
+	"release": {
+		OptLevel: intOrString{Value: 3},
+	},
+	"debug": {
+		OptLevel: intOrString{Value: ""}, // no -O
+	},
+}
+
 type Config struct {
-	Package      PackageSection           `toml:"package"`
-	RawTarget    map[string]TargetSection `toml:"target"`
-	Target       TargetSection            `toml:"target"`
-	Dependencies map[string]string        `toml:"dependencies"`
+	Package      PackageSection            `toml:"package"`
+	RawTarget    map[string]TargetSection  `toml:"target"`
+	Target       TargetSection             `toml:"target"`
+	Dependencies map[string]string         `toml:"dependencies"`
+	Profile      map[string]ProfileSection `toml:"profile"`
+}
+
+func (c Config) Profiles() []string {
+	profiles := make([]string, 0, len(c.Profile))
+	for k := range c.Profile {
+		profiles = append(profiles, k)
+	}
+	slices.Sort(profiles)
+	return profiles
+}
+
+type intOrString struct {
+	Value any
+}
+
+func (o *intOrString) UnmarshalTOML(v any) error {
+	switch val := v.(type) {
+	case int64:
+		o.Value = int(val)
+	case string:
+		o.Value = val
+	default:
+		return fmt.Errorf("unexpected type: %T", v)
+	}
+	return nil
+}
+
+func (o *intOrString) String() string {
+	if o == nil || o.Value == nil {
+		return ""
+	}
+
+	switch v := o.Value.(type) {
+	case int:
+		return strconv.Itoa(v)
+	case string:
+		return v
+	default:
+		return ""
+	}
+}
+
+// ProfileSection defines the [profile.*] section
+type ProfileSection struct {
+	OptLevel intOrString `toml:"opt-level"`
 }
 
 // PackageSection defines the [package] section
@@ -27,7 +84,7 @@ type PackageSection struct {
 	Authors     []string `toml:"authors"`
 }
 
-// TargetSection defines the [target] section
+// TargetSection defines the [target(.*)] section
 type TargetSection struct {
 	Lib     bool              `toml:"lib"`
 	Sources []string          `toml:"sources"`
@@ -112,15 +169,21 @@ func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 	}
 
 	cfg := new(Config)
+	cfg.Profile = defaultProfiles
 
-	// TODO: this is fucking ugly, idk if we can use reflection for the expression thing
-	if pkg, ok := rawConfig["package"]; ok {
-		if err := toml.Unmarshal([]byte(mustMarshal(pkg)), &cfg.Package); err != nil {
+	// FIXME: HACK: this is fucking ugly, we can use reflection for the expression thing
+	if v, ok := rawConfig["package"]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Package); err != nil {
 			return nil, err
 		}
 	}
-	if deps, ok := rawConfig["dependencies"]; ok {
-		if err := toml.Unmarshal([]byte(mustMarshal(deps)), &cfg.Dependencies); err != nil {
+	if v, ok := rawConfig["dependencies"]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Dependencies); err != nil {
+			return nil, err
+		}
+	}
+	if v, ok := rawConfig["profile"]; ok {
+		if err := toml.Unmarshal([]byte(mustMarshal(v)), &cfg.Profile); err != nil {
 			return nil, err
 		}
 	}

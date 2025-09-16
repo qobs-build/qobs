@@ -17,7 +17,7 @@ func doRun(cmd *cobra.Command, args []string) {
 	if err != nil {
 		msg.Fatal("%v", err)
 	}
-	if err := b.BuildAndRun(args); err != nil {
+	if err := b.BuildAndRun(args, flagProfile, flagGenerator.Value()); err != nil {
 		msg.Fatal("%v", err)
 	}
 }
@@ -33,5 +33,5 @@ var runCmd = &cobra.Command{
 func init() {
 	// qobs run subcommand
 	rootCmd.AddCommand(runCmd)
-	runCmd.Flags().BoolVarP(&release, "release", "r", false, "Build in release mode")
+	addBuildFlags(runCmd)
 }

@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
+	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/zeozeozeo/qobs/internal/builder/gen"
@@ -15,6 +17,11 @@ import (
 
 var (
 	errCantRunLib = errors.New("can't run a library target (target.lib is true)")
+)
+
+const (
+	GeneratorNinja = "ninja"
+	GeneratorQobs  = "qobs"
 )
 
 // Package represents a single component (root package or dependency) in the build graph
@@ -190,11 +197,39 @@ func (b *Builder) collectFiles(pkg *Package, patterns []string, stripFilename bo
 	return files, nil
 }
 
-// Build resolves the entire dependency graph and then generates a single build file
-func (b *Builder) Build() error {
+func createGenerator(generator string) gen.Generator {
+	switch generator {
+	case GeneratorNinja:
+		return &gen.NinjaGen{}
+	case GeneratorQobs:
+		return gen.NewQobsBuilder()
+	default:
+		panic("createGenerator: unreachable")
+	}
+}
+
+func (b *Builder) makeCflags(profile string) ([]string, error) {
+	if prof, ok := b.cfg.Profile[profile]; ok {
+		var cflags []string
+		optLevel := prof.OptLevel.String()
+		if optLevel != "" {
+			cflags = append(cflags, "-O"+optLevel)
+		}
+		return cflags, nil
+	}
+	return nil, fmt.Errorf("unknown profile `%s`, known profiles: %s", profile, strings.Join(b.cfg.Profiles(), ", "))
+}
+
+// Build resolves the entire dependency graph and then invokes the generator (or builder)
+func (b *Builder) Build(profile, generator string) error {
 	buildDir := filepath.Join(b.basedir, "build")
 	depsDir := filepath.Join(buildDir, "_deps")
 	if err := os.MkdirAll(depsDir, 0755); err != nil {
+		return err
+	}
+
+	globalCflags, err := b.makeCflags(profile)
+	if err != nil {
 		return err
 	}
 
@@ -204,12 +239,7 @@ func (b *Builder) Build() error {
 		return fmt.Errorf("failed to resolve dependency graph: %w", err)
 	}
 
-	var g gen.Generator
-	if os.Getenv("QOBS_USE_OWN_BUILDER") != "" {
-		g = gen.NewGoBuilder()
-	} else {
-		g = &gen.NinjaGen{}
-	}
+	g := createGenerator(generator)
 	var rootPkg *Package
 
 	// add targets
@@ -232,7 +262,7 @@ func (b *Builder) Build() error {
 
 		// determine the outputs of its dependencies
 		var depOutputs []string
-		var cflags []string
+		cflags := slices.Clone(globalCflags)
 
 		// add own include paths to cflags
 		for _, includePath := range ownHeaders {
@@ -305,12 +335,12 @@ func (b *Builder) Build() error {
 	return nil
 }
 
-func (b *Builder) BuildAndRun(args []string) error {
+func (b *Builder) BuildAndRun(args []string, profile, generator string) error {
 	if b.cfg.Target.Lib {
 		return errCantRunLib
 	}
 
-	if err := b.Build(); err != nil {
+	if err := b.Build(profile, generator); err != nil {
 		return err
 	}
 

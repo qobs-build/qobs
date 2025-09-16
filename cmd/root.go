@@ -10,7 +10,13 @@ import (
 	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
-var release bool
+var (
+	flagProfile   string
+	flagGenerator EnumValue = NewEnumValue("qobs", map[string]string{
+		"ninja": "Generates build.ninja files",
+		"qobs":  "Use Qobs's builder (default)",
+	})
+)
 
 func doBuild(cmd *cobra.Command, args []string) {
 	target := "."
@@ -21,7 +27,7 @@ func doBuild(cmd *cobra.Command, args []string) {
 	if err != nil {
 		msg.Fatal("%v", err)
 	}
-	if err := b.Build(); err != nil {
+	if err := b.Build(flagProfile, flagGenerator.Value()); err != nil {
 		msg.Fatal("%v", err)
 	}
 }
@@ -43,11 +49,17 @@ var buildCmd = &cobra.Command{
 }
 
 func init() {
-	rootCmd.Flags().BoolVarP(&release, "release", "r", false, "Build in release mode")
+	addBuildFlags(rootCmd)
 
 	// qobs build subcommand
 	rootCmd.AddCommand(buildCmd)
-	buildCmd.Flags().BoolVarP(&release, "release", "r", false, "Build in release mode")
+	addBuildFlags(buildCmd)
+}
+
+func addBuildFlags(cmd *cobra.Command) {
+	cmd.Flags().StringVarP(&flagProfile, "profile", "p", "debug", "Build with the given profile")
+	cmd.Flags().VarP(&flagGenerator, "gen", "g", "Generator to build with, one of "+flagGenerator.HelpString())
+	cmd.RegisterFlagCompletionFunc("gen", flagGenerator.CompletionFunc())
 }
 
 func Execute() {
