@@ -166,7 +166,7 @@ func unmarshalSection(rawCfg map[string]any, name string, dst any) error {
 	return nil
 }
 
-// unmarshalSection is a helper to parse, evaluate and merge multiple sections with conditional logic
+// unmarshalConditionalSection is a helper to parse, evaluate and merge multiple sections with conditional logic
 func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst *T, env map[string]any) error {
 	sectionData, ok := rawCfg[name]
 	if !ok {
