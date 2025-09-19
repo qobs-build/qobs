@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/qobs-build/qobs/internal/builder"
+	"github.com/qobs-build/qobs/internal/msg"
 	"github.com/spf13/cobra"
-	"github.com/zeozeozeo/qobs/internal/builder"
-	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
 var (

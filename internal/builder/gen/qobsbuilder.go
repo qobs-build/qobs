@@ -14,7 +14,7 @@ import (
 	"runtime"
 	"slices"
 
-	"github.com/zeozeozeo/qobs/internal/msg"
+	"github.com/qobs-build/qobs/internal/msg"
 	"golang.org/x/sync/errgroup"
 )
 

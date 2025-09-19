@@ -2,9 +2,9 @@
 package cmd
 
 import (
+	"github.com/qobs-build/qobs/internal/builder"
+	"github.com/qobs-build/qobs/internal/msg"
 	"github.com/spf13/cobra"
-	"github.com/zeozeozeo/qobs/internal/builder"
-	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
 func doRun(cmd *cobra.Command, args []string) {

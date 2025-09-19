@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/zeozeozeo/qobs/internal/msg"
+	"github.com/qobs-build/qobs/internal/msg"
 )
 
 // sourceFile represents a single source file and its corresponding object file path

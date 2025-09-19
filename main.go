@@ -1,6 +1,6 @@
 package main
 
-import "github.com/zeozeozeo/qobs/cmd"
+import "github.com/qobs-build/qobs/cmd"
 
 func main() {
 	cmd.Execute()

@@ -11,8 +11,8 @@ import (
 	"strings"
 
 	"github.com/bmatcuk/doublestar/v4"
-	"github.com/zeozeozeo/qobs/internal/builder/gen"
-	"github.com/zeozeozeo/qobs/internal/msg"
+	"github.com/qobs-build/qobs/internal/builder/gen"
+	"github.com/qobs-build/qobs/internal/msg"
 )
 
 var (

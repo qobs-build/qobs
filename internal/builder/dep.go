@@ -21,7 +21,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
-	"github.com/zeozeozeo/qobs/internal/msg"
+	"github.com/qobs-build/qobs/internal/msg"
 )
 
 var depShortcuts = map[string]string{

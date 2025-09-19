@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 
 	"github.com/fatih/color"
+	"github.com/qobs-build/qobs/internal/msg"
 	"github.com/spf13/cobra"
-	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
 func dirSize(path string) (int64, error) {

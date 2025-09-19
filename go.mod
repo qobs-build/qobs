@@ -1,4 +1,4 @@
-module github.com/zeozeozeo/qobs
+module github.com/qobs-build/qobs
 
 go 1.25.1
 

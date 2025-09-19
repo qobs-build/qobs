@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"github.com/qobs-build/qobs/internal/msg"
 	"github.com/spf13/cobra"
-	"github.com/zeozeozeo/qobs/internal/msg"
 )
 
 func writefile(content string, elem ...string) {
