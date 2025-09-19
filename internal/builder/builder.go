@@ -20,8 +20,9 @@ var (
 )
 
 const (
-	GeneratorNinja = "ninja"
-	GeneratorQobs  = "qobs"
+	GeneratorNinja  = "ninja"
+	GeneratorQobs   = "qobs"
+	GeneratorVS2022 = "vs2022"
 )
 
 // Package represents a single component (root package or dependency) in the build graph
@@ -203,6 +204,8 @@ func createGenerator(generator string) gen.Generator {
 		return &gen.NinjaGen{}
 	case GeneratorQobs:
 		return gen.NewQobsBuilder()
+	case GeneratorVS2022:
+		return gen.NewVS2022Gen()
 	default:
 		panic("createGenerator: unreachable")
 	}

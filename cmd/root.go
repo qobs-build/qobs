@@ -13,8 +13,9 @@ import (
 var (
 	flagProfile   string
 	flagGenerator EnumValue = NewEnumValue("qobs", map[string]string{
-		"ninja": "Generates build.ninja files",
-		"qobs":  "Use Qobs's builder (default)",
+		"qobs":   "Use Qobs's builder (default)",
+		"ninja":  "Generates build.ninja files",
+		"vs2022": "Generates Visual Studio 2022 project files",
 	})
 )
 

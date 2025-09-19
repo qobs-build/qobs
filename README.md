@@ -55,5 +55,4 @@ It currently supports the following build systems:
 
 - Its own. Qobs can build the code in parallel itself, without any project generator. It has built-in support for incremental compilation.
 - [Ninja](https://ninja-build.org/), use with `-g ninja`
-
-(Visual Studio is planned)
+- Visual Studio 17 2022 (.vcxproj and .sln files), use with `-g vs2022`

@@ -25,15 +25,15 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     wc.lpszClassName = g_szClassName;
     wc.hIconSm       = LoadIcon(NULL, IDI_APPLICATION);
 
-    if (!RegisterClassExA(&wc))
+    if (!RegisterClassEx(&wc))
     {
-        MessageBoxA(NULL, "Window Registration Failed!", "Error!",
+        MessageBox(NULL, "Window Registration Failed!", "Error!",
                     MB_ICONEXCLAMATION | MB_OK);
         return 0;
     }
 
     // create the window
-    hwnd = CreateWindowExA(
+    hwnd = CreateWindowEx(
         0,
         g_szClassName,
         "GDI Triangle Example",
@@ -43,7 +43,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     if (hwnd == NULL)
     {
-        MessageBoxA(NULL, "Window Creation Failed!", "Error!",
+        MessageBox(NULL, "Window Creation Failed!", "Error!",
                     MB_ICONEXCLAMATION | MB_OK);
         return 0;
     }

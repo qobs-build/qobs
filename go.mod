@@ -6,6 +6,7 @@ require (
 	github.com/expr-lang/expr v1.17.6
 	github.com/fatih/color v1.18.0
 	github.com/go-git/go-git/v6 v6.0.0-20250910120214-3a68d0404116
+	github.com/heaths/go-vssetup v0.4.0
 	github.com/spf13/cobra v1.10.1
 )
 
@@ -29,10 +30,13 @@ require (
 	golang.org/x/exp v0.0.0-20250911091902-df9299821621 // indirect
 	golang.org/x/net v0.44.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
+	golang.org/x/text v0.29.0 // indirect
 )
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.9.1
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/google/uuid v1.6.0
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.4
 	github.com/spf13/pflag v1.0.10 // indirect
