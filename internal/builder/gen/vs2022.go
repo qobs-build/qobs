@@ -191,7 +191,7 @@ func (g *VS2022Gen) AddTarget(name, basedir string, sources, dependencies []stri
 func (g *VS2022Gen) Generate() string {
 	projectGuids := make(map[string]string)
 	for name := range g.targets {
-		projectGuids[name] = strings.ToUpper(uuid.New().String())
+		projectGuids[name] = randomGuid()
 	}
 
 	for name, target := range g.targets {
@@ -207,7 +207,7 @@ func (g *VS2022Gen) Generate() string {
 }
 
 func (g *VS2022Gen) generateSolutionFile(projectGuids map[string]string) string {
-	solutionGuid := strings.ToUpper(uuid.New().String())
+	solutionGuid := randomGuid()
 	var sb strings.Builder
 
 	writeln(&sb, "Microsoft Visual Studio Solution File, Format Version 12.00")
@@ -262,8 +262,14 @@ func (g *VS2022Gen) generateProjectFile(buildDir, projectDir, name string, targe
 
 	allPropertyGroups := []VSPropertyGroup{
 		{PreferredToolArchitecture: "x64"},
+		{
+			Label:                        "Globals",
+			ProjectGuid:                  "{" + projectGuids[name] + "}",
+			Keyword:                      "Win32Proj",
+			WindowsTargetPlatformVersion: "10.0",
+			ProjectName:                  name,
+		},
 	}
-	allPropertyGroups = append(allPropertyGroups, g.createGlobalPropertyGroups(name, projectGuids[name])...)
 	allPropertyGroups = append(allPropertyGroups, g.createConfigurationPropertyGroups(target, buildDir)...)
 
 	allItemGroups := []VSItemGroup{
@@ -274,15 +280,16 @@ func (g *VS2022Gen) generateProjectFile(buildDir, projectDir, name string, targe
 				{Include: "Release|x64", Configuration: "Release", Platform: "x64"},
 			},
 		},
+		{ProjectReferences: projectRefs},
+		{ClCompiles: clCompiles},
 	}
-	allItemGroups = append(allItemGroups, g.createSourceItemGroups(clCompiles)...)
-	allItemGroups = append(allItemGroups, VSItemGroup{ProjectReferences: projectRefs})
 
 	allImports := []VSImport{
 		{Project: `$(VCTargetsPath)\Microsoft.Cpp.Default.props`},
+		{Project: `$(VCTargetsPath)\Microsoft.Cpp.props`},
+		{Project: `$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props`, Condition: `exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')`, Label: "LocalAppDataPlatform"},
+		{Project: `$(VCTargetsPath)\Microsoft.Cpp.targets`},
 	}
-	allImports = append(allImports, g.createStandardImports()...)
-	allImports = append(allImports, VSImport{Project: `$(VCTargetsPath)\Microsoft.Cpp.targets`})
 
 	project := VSProject{
 		DefaultTargets:       "Build",
@@ -300,18 +307,6 @@ func (g *VS2022Gen) generateProjectFile(buildDir, projectDir, name string, targe
 		return err
 	}
 	return os.WriteFile(filepath.Join(projectDir, name+".vcxproj"), []byte(xml.Header+string(output)), 0644)
-}
-
-func (g *VS2022Gen) createGlobalPropertyGroups(name, guid string) []VSPropertyGroup {
-	return []VSPropertyGroup{
-		{
-			Label:                        "Globals",
-			ProjectGuid:                  "{" + guid + "}",
-			Keyword:                      "Win32Proj",
-			WindowsTargetPlatformVersion: "10.0",
-			ProjectName:                  name,
-		},
-	}
 }
 
 func (g *VS2022Gen) createConfigurationPropertyGroups(target buildUnit, buildDir string) []VSPropertyGroup {
@@ -410,17 +405,6 @@ func (g *VS2022Gen) createItemDefinitionGroups(target buildUnit) []VSItemDefinit
 	}
 }
 
-func (g *VS2022Gen) createSourceItemGroups(clCompiles []VSClCompile) []VSItemGroup {
-	return []VSItemGroup{{ClCompiles: clCompiles}}
-}
-
-func (g *VS2022Gen) createStandardImports() []VSImport {
-	return []VSImport{
-		{Project: `$(VCTargetsPath)\Microsoft.Cpp.props`},
-		{Project: `$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props`, Condition: `exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')`, Label: "LocalAppDataPlatform"},
-	}
-}
-
 func (g *VS2022Gen) generateFiltersFile(projectDir, name string, target buildUnit) error {
 	clCompiles := make([]VSFiltersClCompile, 0, len(target.sources))
 	for _, source := range target.sources {
@@ -432,7 +416,7 @@ func (g *VS2022Gen) generateFiltersFile(projectDir, name string, target buildUni
 		XMLNS:        "http://schemas.microsoft.com/developer/msbuild/2003",
 		ItemGroups: []VSFiltersItemGroup{
 			{ClCompiles: clCompiles},
-			{Filters: []VSFiltersFilter{{Include: "Source Files", UniqueIdentifier: "{" + strings.ToUpper(uuid.New().String()) + "}", Extensions: "cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx"}}},
+			{Filters: []VSFiltersFilter{{Include: "Source Files", UniqueIdentifier: "{" + randomGuid() + "}", Extensions: "cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx"}}},
 		},
 	}
 	output, err := xml.MarshalIndent(filters, "", "  ")
@@ -511,3 +495,5 @@ func parseLibraries(ldflags []string, isExe bool) string {
 	}
 	return strings.Join(libs, ";") + ";%(AdditionalDependencies)"
 }
+
+func randomGuid() string { return strings.ToUpper(uuid.New().String()) }
