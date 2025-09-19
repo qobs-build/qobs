@@ -177,6 +177,11 @@ func (g *VS2022Gen) AddTarget(name, basedir string, sources, dependencies []stri
 	for _, srcPath := range sources {
 		targetSources = append(targetSources, sourceFile{src: srcPath, isCxx: isCxx(srcPath)})
 	}
+
+	// since the builder passes the name prefixed with .lib/.a/.exe we need to remove it
+	// TODO: maybe this should always be decided by the generator?
+	name = strings.TrimSuffix(name, getTargetExt(isLib))
+
 	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,

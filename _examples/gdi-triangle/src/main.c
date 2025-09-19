@@ -1,18 +1,17 @@
 #include <windows.h>
-
-const char g_szClassName[] = "MyTriangleWindow";
+const TCHAR g_szClassName[] = TEXT("MyTriangleWindow");
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
                    LPSTR lpCmdLine, int nCmdShow)
 {
-    WNDCLASSEXA wc;
+    WNDCLASSEX wc;
     HWND hwnd;
     MSG Msg;
 
     // register window class
-    wc.cbSize        = sizeof(WNDCLASSEXA);
+    wc.cbSize        = sizeof(WNDCLASSEX);
     wc.style         = CS_HREDRAW | CS_VREDRAW;
     wc.lpfnWndProc   = WndProc;
     wc.cbClsExtra    = 0;
@@ -27,7 +26,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
 
     if (!RegisterClassEx(&wc))
     {
-        MessageBox(NULL, "Window Registration Failed!", "Error!",
+        MessageBox(NULL, TEXT("Window Registration Failed!"), TEXT("Error!"),
                     MB_ICONEXCLAMATION | MB_OK);
         return 0;
     }
@@ -36,14 +35,14 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
     hwnd = CreateWindowEx(
         0,
         g_szClassName,
-        "GDI Triangle Example",
+        TEXT("GDI Triangle Example"),
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, 400, 300,
         NULL, NULL, hInstance, NULL);
 
     if (hwnd == NULL)
     {
-        MessageBox(NULL, "Window Creation Failed!", "Error!",
+        MessageBox(NULL, TEXT("Window Creation Failed!"), TEXT("Error!"),
                     MB_ICONEXCLAMATION | MB_OK);
         return 0;
     }

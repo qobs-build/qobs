@@ -18,6 +18,10 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+const (
+	sameLine = "\r\033[K"
+)
+
 // BuildState represents the state of a build target for incremental builds
 type BuildState struct {
 	Sources      map[string]string `json:"sources,omitempty"`      // source file -> hash
@@ -225,12 +229,13 @@ func (g *QobsBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []co
 
 // executeBuild runs the planned compile and link jobs and updates the build state
 func (g *QobsBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) error {
-	if err := runJobs(compileJobs, runCompileJob, g.jobs); err != nil {
+	if err := runJobs(compileJobs, runCompileJob, g.jobs, 0, len(compileJobs)+len(linkJobs)); err != nil {
 		return fmt.Errorf("compilation failed: %w", err)
 	}
-	if err := runJobs(linkJobs, runLinkJob, g.jobs); err != nil {
+	if err := runJobs(linkJobs, runLinkJob, g.jobs, len(compileJobs), len(compileJobs)+len(linkJobs)); err != nil {
 		return fmt.Errorf("linking failed: %w", err)
 	}
+	fmt.Println()
 
 	for _, job := range linkJobs {
 		target, ok := g.targets[job.name]
@@ -431,7 +436,7 @@ func (g *QobsBuilder) hasCxxInTarget(target buildUnit) bool {
 }
 
 // runJobs runs jobs in parallel
-func runJobs[T any](jobs []T, jobfunc func(job T) error, limit int) error {
+func runJobs[T any](jobs []T, jobfunc func(job T, done, total int) error, limit, start, total int) error {
 	if len(jobs) == 0 {
 		return nil
 	}
@@ -439,9 +444,9 @@ func runJobs[T any](jobs []T, jobfunc func(job T) error, limit int) error {
 	eg, _ := errgroup.WithContext(context.Background())
 	eg.SetLimit(limit)
 
-	for _, job := range jobs {
+	for i, job := range jobs {
 		eg.Go(func() error {
-			return jobfunc(job)
+			return jobfunc(job, start+i+1, total)
 		})
 	}
 
@@ -449,7 +454,7 @@ func runJobs[T any](jobs []T, jobfunc func(job T) error, limit int) error {
 }
 
 // runCompileJob runs a single compilation job
-func runCompileJob(job compileJob) error {
+func runCompileJob(job compileJob, done, total int) error {
 	if err := os.MkdirAll(filepath.Dir(job.obj), 0755); err != nil {
 		return fmt.Errorf("failed to create object directory: %w", err)
 	}
@@ -462,19 +467,19 @@ func runCompileJob(job compileJob) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	fmt.Printf("CC %s\n", job.src)
+	fmt.Printf("%s[%d/%d] CC %s", sameLine, done, total, job.src)
 	return cmd.Run()
 }
 
 // runLinkJob runs a single linking job
-func runLinkJob(job linkJob) error {
+func runLinkJob(job linkJob, done, total int) error {
 	var cmd *exec.Cmd
 	if job.isLib {
 		args := []string{"rcs", job.out}
 		args = append(args, job.objs...)
 
 		cmd = exec.Command("ar", args...)
-		fmt.Printf("AR %s\n", job.out)
+		fmt.Printf("%s[%d/%d] AR %s", sameLine, done, total, job.out)
 	} else {
 		args := []string{"-o", job.out}
 		args = append(args, job.objs...)
@@ -482,7 +487,7 @@ func runLinkJob(job linkJob) error {
 		args = append(args, job.ldflags...)
 
 		cmd = exec.Command(job.cc, args...)
-		fmt.Printf("LINK %s\n", job.out)
+		fmt.Printf("%s[%d/%d] LINK %s", sameLine, done, total, job.out)
 	}
 
 	cmd.Stdout = os.Stdout
