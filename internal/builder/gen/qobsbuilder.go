@@ -271,14 +271,14 @@ func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *B
 
 // createLinkJob constructs a linkJob for a given buildUnit
 func (g *QobsBuilder) createLinkJob(target buildUnit) (linkJob, error) {
-	objects := make([]string, len(target.sources))
-	for i, src := range target.sources {
-		objects[i] = filepath.Join(g.buildDir, src.obj)
+	objects := make([]string, 0, len(target.sources))
+	for _, src := range target.sources {
+		objects = append(objects, filepath.Join(g.buildDir, src.obj))
 	}
 
-	dependencies := make([]string, len(target.dependencies))
-	for i, dep := range target.dependencies {
-		dependencies[i] = filepath.Join(g.buildDir, dep)
+	dependencies := make([]string, 0, len(target.dependencies))
+	for _, dep := range target.dependencies {
+		dependencies = append(dependencies, filepath.Join(g.buildDir, dep))
 	}
 
 	isCxx := g.hasCxxInTarget(target)

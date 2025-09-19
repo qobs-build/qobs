@@ -47,8 +47,8 @@ func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []strin
 		g.targets = make(map[string]buildUnit)
 	}
 
-	targetSources := make([]sourceFile, len(sources))
-	for i, srcPath := range sources {
+	targetSources := make([]sourceFile, 0, len(sources))
+	for _, srcPath := range sources {
 		rel, err := filepath.Rel(basedir, srcPath)
 		if err != nil {
 			rel = filepath.Base(srcPath)
@@ -56,7 +56,7 @@ func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []strin
 		}
 
 		objPath := quote(filepath.ToSlash(filepath.Join("QobsFiles", name+".dir", rel))) + ".obj"
-		targetSources[i] = sourceFile{src: srcPath, obj: objPath, isCxx: isCxx(srcPath)}
+		targetSources = append(targetSources, sourceFile{src: srcPath, obj: objPath, isCxx: isCxx(srcPath)})
 	}
 
 	g.targets[name] = buildUnit{

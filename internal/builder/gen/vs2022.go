@@ -244,20 +244,20 @@ func (g *VS2022Gen) generateSolutionFile(projectGuids map[string]string) string 
 }
 
 func (g *VS2022Gen) generateProjectFile(buildDir, projectDir, name string, target buildUnit, projectGuids map[string]string) error {
-	clCompiles := make([]VSClCompile, len(target.sources))
-	for i, source := range target.sources {
+	clCompiles := make([]VSClCompile, 0, len(target.sources))
+	for _, source := range target.sources {
 		relPath, _ := filepath.Rel(projectDir, source.src)
-		clCompiles[i] = VSClCompile{Include: relPath}
+		clCompiles = append(clCompiles, VSClCompile{Include: relPath})
 	}
 
-	projectRefs := make([]VSProjectReference, len(target.dependencies))
-	for i, depName := range target.dependencies {
-		projectRefs[i] = VSProjectReference{
+	projectRefs := make([]VSProjectReference, 0, len(target.dependencies))
+	for _, depName := range target.dependencies {
+		projectRefs = append(projectRefs, VSProjectReference{
 			Include:                 fmt.Sprintf(`..\%s\%s.vcxproj`, depName, depName),
 			Project:                 "{" + projectGuids[depName] + "}",
 			Name:                    depName,
 			LinkLibraryDependencies: true,
-		}
+		})
 	}
 
 	allPropertyGroups := []VSPropertyGroup{
@@ -422,10 +422,10 @@ func (g *VS2022Gen) createStandardImports() []VSImport {
 }
 
 func (g *VS2022Gen) generateFiltersFile(projectDir, name string, target buildUnit) error {
-	clCompiles := make([]VSFiltersClCompile, len(target.sources))
-	for i, source := range target.sources {
+	clCompiles := make([]VSFiltersClCompile, 0, len(target.sources))
+	for _, source := range target.sources {
 		relPath, _ := filepath.Rel(projectDir, source.src)
-		clCompiles[i] = VSFiltersClCompile{Include: relPath, Filter: "Source Files"}
+		clCompiles = append(clCompiles, VSFiltersClCompile{Include: relPath, Filter: "Source Files"})
 	}
 	filters := VSFiltersProject{
 		ToolsVersion: "17.0",
@@ -435,7 +435,7 @@ func (g *VS2022Gen) generateFiltersFile(projectDir, name string, target buildUni
 			{Filters: []VSFiltersFilter{{Include: "Source Files", UniqueIdentifier: "{" + strings.ToUpper(uuid.New().String()) + "}", Extensions: "cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx"}}},
 		},
 	}
-	output, err := xml.MarshalIndent(filters, "  ", "  ")
+	output, err := xml.MarshalIndent(filters, "", "  ")
 	if err != nil {
 		return err
 	}
