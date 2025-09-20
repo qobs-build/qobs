@@ -46,20 +46,22 @@ func humanSize(bytes int64) string {
 	return fmt.Sprintf("%.2f %s", value, sizes[i])
 }
 
+func dirExists(path string) bool {
+	stat, err := os.Stat(path)
+	return err == nil && stat.IsDir()
+}
+
 func cleanDir(path string) {
 	buildDir := filepath.Join(path, "build")
-	qobsFilesDir := filepath.Join(buildDir, "QobsFiles")
-	if stat, err := os.Stat(qobsFilesDir); err == nil && stat.IsDir() {
+	if dirExists(filepath.Join(buildDir, "QobsFiles")) || dirExists(filepath.Join(buildDir, "_deps")) {
 		sz, _ := dirSize(buildDir)
 		if err := os.RemoveAll(buildDir); err != nil {
-			msg.Warn("failed to remove %s: %v", qobsFilesDir, err)
+			msg.Warn("failed to remove %s: %v", buildDir, err)
 		} else {
 			fmt.Printf("%s %s of build artifacts\n", color.HiGreenString("Removed"), humanSize(sz))
 		}
-	} else if os.IsNotExist(err) {
-		msg.Info("couldn't find build directory; nothing to clean")
 	} else {
-		msg.Warn("failed to stat %s: %v", qobsFilesDir, err)
+		msg.Info("couldn't find build directory; nothing to clean")
 	}
 }
 

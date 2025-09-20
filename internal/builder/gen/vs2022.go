@@ -181,12 +181,16 @@ func (g *VS2022Gen) AddTarget(name, basedir string, sources, dependencies []stri
 	// since the builder passes the name prefixed with .lib/.a/.exe we need to remove it
 	// TODO: maybe this should always be decided by the generator?
 	name = strings.TrimSuffix(name, getTargetExt(isLib))
+	cleanedDependencies := make([]string, 0, len(dependencies))
+	for _, dep := range dependencies {
+		cleanedDependencies = append(cleanedDependencies, strings.TrimSuffix(dep, getTargetExt(true)))
+	}
 
 	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,
 		sources:      targetSources,
-		dependencies: dependencies,
+		dependencies: cleanedDependencies,
 		cflags:       cflags,
 		ldflags:      ldflags,
 		basedir:      basedir,
@@ -199,12 +203,25 @@ func (g *VS2022Gen) Generate() string {
 		projectGuids[name] = randomGuid()
 	}
 
+	var mainBuildDir string
+	for _, target := range g.targets {
+		if !target.isLib {
+			mainBuildDir = filepath.Join(target.basedir, "build")
+			break
+		}
+	}
+	if mainBuildDir == "" {
+		for _, target := range g.targets {
+			mainBuildDir = filepath.Join(target.basedir, "build")
+			break
+		}
+	}
+
 	for name, target := range g.targets {
-		buildDir := filepath.Join(target.basedir, "build")
-		projectDir := filepath.Join(buildDir, name)
+		projectDir := filepath.Join(mainBuildDir, name)
 		os.MkdirAll(projectDir, 0755)
 
-		g.generateProjectFile(buildDir, projectDir, name, target, projectGuids)
+		g.generateProjectFile(mainBuildDir, projectDir, name, target, projectGuids)
 		g.generateFiltersFile(projectDir, name, target)
 	}
 
@@ -212,7 +229,6 @@ func (g *VS2022Gen) Generate() string {
 }
 
 func (g *VS2022Gen) generateSolutionFile(projectGuids map[string]string) string {
-	solutionGuid := randomGuid()
 	var sb strings.Builder
 
 	writeln(&sb, "Microsoft Visual Studio Solution File, Format Version 12.00")
@@ -241,7 +257,7 @@ func (g *VS2022Gen) generateSolutionFile(projectGuids map[string]string) string 
 	writeln(&sb, "\t\tHideSolutionNode = FALSE")
 	writeln(&sb, "\tEndGlobalSection")
 	writeln(&sb, "\tGlobalSection(ExtensibilityGlobals) = postSolution")
-	writeln(&sb, "\t\tSolutionGuid = {", solutionGuid, "}")
+	writeln(&sb, "\t\tSolutionGuid = {", randomGuid(), "}")
 	writeln(&sb, "\tEndGlobalSection")
 	writeln(&sb, "EndGlobal")
 
@@ -318,8 +334,8 @@ func (g *VS2022Gen) createConfigurationPropertyGroups(target buildUnit, buildDir
 	trueVal, falseVal := true, false
 	debugOutDir := filepath.Join(buildDir, "Debug") + `\`
 	releaseOutDir := filepath.Join(buildDir, "Release") + `\`
-	debugIntDir := filepath.Join(target.basedir, "build", target.name, "int", "Debug") + `\`
-	releaseIntDir := filepath.Join(target.basedir, "build", target.name, "int", "Release") + `\`
+	debugIntDir := filepath.Join(buildDir, target.name, "int", "Debug") + `\`
+	releaseIntDir := filepath.Join(buildDir, target.name, "int", "Release") + `\`
 
 	return []VSPropertyGroup{
 		{
@@ -362,6 +378,11 @@ func (g *VS2022Gen) createConfigurationPropertyGroups(target buildUnit, buildDir
 
 func (g *VS2022Gen) createItemDefinitionGroups(target buildUnit) []VSItemDefinitionGroup {
 	trueVal, falseVal := true, false
+	subsystem := "Windows" // TODO: make this configurable
+	if !target.isLib {
+		subsystem = "Console"
+	}
+
 	return []VSItemDefinitionGroup{
 		{
 			Condition: "'$(Configuration)|$(Platform)'=='Debug|x64'",
@@ -377,7 +398,7 @@ func (g *VS2022Gen) createItemDefinitionGroups(target buildUnit) []VSItemDefinit
 				RuntimeLibrary:               "MultiThreadedDebugDLL",
 			},
 			Link: VSLinkDef{
-				SubSystem:                "Windows",
+				SubSystem:                subsystem,
 				GenerateDebugInformation: &trueVal,
 				AdditionalDependencies:   parseLibraries(target.ldflags, !target.isLib),
 				ProgramDataBaseFile:      `$(OutDir)$(TargetName).pdb`,
@@ -398,7 +419,7 @@ func (g *VS2022Gen) createItemDefinitionGroups(target buildUnit) []VSItemDefinit
 				IntrinsicFunctions:           &trueVal,
 			},
 			Link: VSLinkDef{
-				SubSystem:                "Windows",
+				SubSystem:                subsystem,
 				GenerateDebugInformation: &falseVal,
 				AdditionalDependencies:   parseLibraries(target.ldflags, !target.isLib),
 				EnableCOMDATFolding:      &trueVal,
