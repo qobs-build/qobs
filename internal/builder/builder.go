@@ -291,7 +291,31 @@ func (b *Builder) Build(profile, generator string) error {
 			}
 		}
 
+		// build ldflags
 		var ldflags []string
+
+		seen := make(map[string]bool)
+		var collectLinks func(string)
+		collectLinks = func(name string) {
+			if seen[name] {
+				return
+			}
+			seen[name] = true
+			dep, ok := packages[name]
+			if !ok {
+				return
+			}
+			for _, lib := range dep.Config.Target.Links {
+				ldflags = append(ldflags, "-l"+lib)
+			}
+			for child := range dep.Config.Dependencies {
+				collectLinks(child)
+			}
+		}
+
+		for depName := range pkg.Config.Dependencies {
+			collectLinks(depName)
+		}
 
 		for define, v := range pkg.Config.Target.Defines {
 			if v != "" {
@@ -302,7 +326,7 @@ func (b *Builder) Build(profile, generator string) error {
 		}
 
 		for _, lib := range pkg.Config.Target.Links {
-			ldflags = append(ldflags, `-l`+lib)
+			ldflags = append(ldflags, "-l"+lib)
 		}
 
 		g.AddTarget(

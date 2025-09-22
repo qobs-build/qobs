@@ -21,6 +21,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/go-git/go-git/v6"
 	"github.com/go-git/go-git/v6/plumbing"
+	"github.com/qobs-build/qobs/internal/index"
 	"github.com/qobs-build/qobs/internal/msg"
 )
 
@@ -101,33 +102,13 @@ func parseGitURL(rawURL string) (res gitURL) {
 	return
 }
 
-type indentWriter struct {
-	Indent    int
-	W         io.Writer
-	didIndent bool
-}
-
-func (w *indentWriter) Write(p []byte) (n int, err error) {
-	for _, c := range p {
-		if !w.didIndent {
-			w.W.Write([]byte(strings.Repeat(" ", w.Indent)))
-			w.didIndent = true
-		}
-		w.W.Write([]byte{c})
-		if c == '\n' || c == '\r' {
-			w.didIndent = false
-		}
-	}
-	return len(p), nil
-}
-
 // cloneGitRepo clones a Git remote into the specified directory
 func cloneGitRepo(url, toWhere string) (string, error) {
 	parsedURL := parseGitURL(url)
 
 	cloneOptions := &git.CloneOptions{
 		URL:               parsedURL.cleanURL,
-		Progress:          &indentWriter{Indent: 4, W: os.Stdout},
+		Progress:          &msg.IndentWriter{Indent: "    ", W: os.Stdout},
 		RecurseSubmodules: git.DefaultSubmoduleRecursionDepth,
 	}
 
@@ -167,6 +148,8 @@ func cloneGitRepo(url, toWhere string) (string, error) {
 			return toWhere, fmt.Errorf("failed to checkout `%s`: %w", revision, err)
 		}
 	}
+
+	maybeFetchConfigFromIndex(toWhere, parsedURL.cleanURL)
 
 	return toWhere, nil
 }
@@ -287,6 +270,8 @@ func downloadAndExtractArchive(downloadURL, toWhere string) (string, error) {
 	if extractErr != nil {
 		return "", fmt.Errorf("failed to extract archive: %w", extractErr)
 	}
+
+	maybeFetchConfigFromIndex(toWhere, cleanURL)
 
 	return toWhere, nil
 }
@@ -439,4 +424,17 @@ func untar(src, dest string) error {
 			}
 		}
 	}
+}
+
+func maybeFetchConfigFromIndex(path, url string) {
+	if stat, err := os.Stat(filepath.Join(path, "Qobs.toml")); err == nil && !stat.IsDir() {
+		return // already has config in repo
+	}
+
+	index, err := index.GetIndexAnyhow()
+	if err != nil {
+		msg.Error("couldn't fetch index, continuing without: %v", err)
+		return
+	}
+	index.Copy(path, url)
 }

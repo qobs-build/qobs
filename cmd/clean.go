@@ -1,3 +1,4 @@
+// qobs clean [path]
 package cmd
 
 import (

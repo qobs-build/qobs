@@ -1,0 +1,10 @@
+[package]
+name = "raylib-basic-window"
+description = "raylib [core] example - basic window"
+authors = ["raysan5", "zeozeozeo"]
+
+[target]
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+
+[dependencies]
+raylib = "gh:raysan5/raylib"
