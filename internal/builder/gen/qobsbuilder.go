@@ -243,7 +243,7 @@ func (g *QobsBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob)
 			continue
 		}
 		if err := g.updateBuildState(target); err != nil {
-			msg.Warn("failed to update build state for target %s: %v", target.name, err)
+			msg.Warn("failed to update build state for target %q: %v", target.name, err)
 		}
 	}
 
@@ -263,7 +263,7 @@ func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *B
 	hash, err := g.fileHash(src.src)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, fmt.Errorf("source file %s not found", src.src)
+			return true, fmt.Errorf("source file %q not found", src.src)
 		}
 		return true, err
 	}

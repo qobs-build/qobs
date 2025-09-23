@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"os"
 	"path/filepath"
 
@@ -142,43 +141,7 @@ func (index Index) Copy(destPath, url string) error {
 	}
 
 	fromPath := filepath.Join(index.basePath, path)
-
-	return filepath.WalkDir(fromPath, func(src string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		rel, err := filepath.Rel(fromPath, src)
-		if err != nil {
-			return err
-		}
-
-		dst := filepath.Join(destPath, rel)
-
-		if d.IsDir() {
-			return os.MkdirAll(dst, 0755)
-		}
-
-		// copy file
-		if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
-			return err
-		}
-
-		in, err := os.Open(src)
-		if err != nil {
-			return err
-		}
-		defer in.Close()
-
-		out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, d.Type())
-		if err != nil {
-			return err
-		}
-		defer out.Close()
-
-		_, err = io.Copy(out, in)
-		return err
-	})
+	return os.CopyFS(destPath, os.DirFS(fromPath))
 }
 
 func (idx *Index) SetDep(url, path string) {

@@ -24,13 +24,10 @@ func NewEnumValue(defaultVal string, allowed map[string]string) EnumValue {
 	}
 }
 
-func (e *EnumValue) String() string {
-	return e.value
-}
-
-func (e *EnumValue) HelpString() string {
-	return "[" + strings.Join(e.AllowedKeys(), ", ") + "]"
-}
+func (e *EnumValue) String() string     { return e.value }
+func (e *EnumValue) HelpString() string { return "[" + strings.Join(e.AllowedKeys(), ", ") + "]" }
+func (e *EnumValue) Type() string       { return "enum" }
+func (e *EnumValue) Value() string      { return e.value }
 
 func (e *EnumValue) Set(v string) error {
 	if _, ok := e.allowed[v]; ok {
@@ -38,14 +35,6 @@ func (e *EnumValue) Set(v string) error {
 		return nil
 	}
 	return fmt.Errorf("must be one of: %s", strings.Join(e.AllowedKeys(), ", "))
-}
-
-func (e *EnumValue) Type() string {
-	return "enum"
-}
-
-func (e *EnumValue) Value() string {
-	return e.value
 }
 
 func (e *EnumValue) AllowedKeys() []string {

@@ -51,7 +51,7 @@ func (p *Package) outputName() string {
 type Builder struct {
 	cfg     *Config
 	basedir string
-	env     map[string]any
+	env     ConfigEnv
 }
 
 func NewBuilderInDirectory(path string) (*Builder, error) {
@@ -60,7 +60,7 @@ func NewBuilderInDirectory(path string) (*Builder, error) {
 	if err != nil {
 		return nil, err
 	}
-	env := NewConfigEnv()
+	env := NewConfigEnv(path)
 	cfg, err := ParseConfigFromFile(filepath.Join(path, "Qobs.toml"), env)
 	if err != nil {
 		return nil, err
@@ -168,6 +168,10 @@ func (b *Builder) collectFiles(pkg *Package, patterns []string, stripFilename bo
 	}
 
 	for _, pat := range patterns {
+		if filepath.IsAbs(pat) {
+			files = append(files, filepath.Clean(pat))
+			continue
+		}
 		matches, err := doublestar.Glob(fsys, pat, globparams...)
 		if err != nil {
 			return nil, err
@@ -179,12 +183,12 @@ func (b *Builder) collectFiles(pkg *Package, patterns []string, stripFilename bo
 			}
 			if stripFilename {
 				if stat, err := os.Stat(absPath); err == nil && !stat.IsDir() {
-					stripmap[filepath.Dir(absPath)] = struct{}{} // this is a file, we need directories
+					stripmap[filepath.Dir(filepath.Clean(absPath))] = struct{}{} // this is a file, we need directories
 				} else {
 					stripmap[absPath] = struct{}{}
 				}
 			} else {
-				files = append(files, absPath)
+				files = append(files, filepath.Clean(absPath))
 			}
 		}
 	}
@@ -267,6 +271,8 @@ func (b *Builder) Build(profile, generator string) error {
 		var depOutputs []string
 		cflags := slices.Clone(globalCflags)
 
+		cflags = append(cflags, pkg.Config.Target.Cflags...)
+
 		// add own include paths to cflags
 		for _, includePath := range ownHeaders {
 			cflags = append(cflags, "-I"+includePath)
@@ -327,6 +333,10 @@ func (b *Builder) Build(profile, generator string) error {
 
 		for _, lib := range pkg.Config.Target.Links {
 			ldflags = append(ldflags, "-l"+lib)
+		}
+
+		if err := pkg.Config.RunBuildScript(b.env); err != nil {
+			return err
 		}
 
 		g.AddTarget(

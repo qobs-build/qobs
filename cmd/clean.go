@@ -57,7 +57,7 @@ func cleanDir(path string) {
 	if dirExists(filepath.Join(buildDir, "QobsFiles")) || dirExists(filepath.Join(buildDir, "_deps")) {
 		sz, _ := dirSize(buildDir)
 		if err := os.RemoveAll(buildDir); err != nil {
-			msg.Warn("failed to remove %s: %v", buildDir, err)
+			msg.Warn("failed to remove %q: %v", buildDir, err)
 		} else {
 			fmt.Printf("%s %s of build artifacts\n", color.HiGreenString("Removed"), humanSize(sz))
 		}

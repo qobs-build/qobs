@@ -6,13 +6,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"slices"
 	"strconv"
+	"strings"
 
 	"github.com/expr-lang/expr"
 	"github.com/pelletier/go-toml/v2"
+	"github.com/sergi/go-diff/diffmatchpatch"
 )
 
 var defaultProfiles = map[string]ProfileSection{
@@ -81,6 +85,7 @@ type PackageSection struct {
 	Name        string   `toml:"name"`
 	Description string   `toml:"description"`
 	Authors     []string `toml:"authors"`
+	Build       string   `toml:"build"`
 }
 
 // TargetSection defines the [target(.*)] section
@@ -90,6 +95,7 @@ type TargetSection struct {
 	Headers []string          `toml:"headers"`
 	Defines map[string]string `toml:"defines"`
 	Links   []string          `toml:"links"`
+	Cflags  []string          `toml:"cflags"`
 }
 
 // mergeStructs merges the fields of the src struct into the dst struct
@@ -167,7 +173,7 @@ func unmarshalSection(rawCfg map[string]any, name string, dst any) error {
 }
 
 // unmarshalConditionalSection is a helper to parse, evaluate and merge multiple sections with conditional logic
-func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst *T, env map[string]any) error {
+func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst *T, env ConfigEnv) error {
 	sectionData, ok := rawCfg[name]
 	if !ok {
 		return nil
@@ -178,16 +184,29 @@ func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst 
 		return fmt.Errorf("invalid [%s] section format: expected a table", name)
 	}
 
-	if err := toml.Unmarshal([]byte(mustMarshal(sectionMap)), dst); err != nil {
-		return fmt.Errorf("failed to parse base [%s] section: %w", name, err)
+	baseFields := make(map[string]any)
+	conditionalFields := make(map[string]map[string]any)
+
+	for key, val := range sectionMap {
+		if subMap, ok := val.(map[string]any); ok {
+			_, err := expr.Compile(key, expr.Env(env))
+			if err == nil {
+				conditionalFields[key] = subMap
+			} else {
+				baseFields[key] = val
+			}
+		} else {
+			baseFields[key] = val
+		}
 	}
 
-	for expression, val := range sectionMap {
-		condMap, isMap := val.(map[string]any)
-		if !isMap {
-			continue
+	if len(baseFields) > 0 {
+		if err := toml.Unmarshal([]byte(mustMarshal(baseFields)), dst); err != nil {
+			return fmt.Errorf("failed to parse base [%s] section: %w", name, err)
 		}
+	}
 
+	for expression, condMap := range conditionalFields {
 		program, err := expr.Compile(expression, expr.Env(env))
 		if err != nil {
 			return fmt.Errorf("failed to compile expression for [%s.%q]: %w", name, expression, err)
@@ -198,7 +217,7 @@ func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst 
 			return fmt.Errorf("failed to run expression for [%s.%q]: %w", name, expression, err)
 		}
 
-		// merge sections if result is true
+		// merge sections if the result is true
 		if matched, ok := result.(bool); !ok || !matched {
 			continue
 		}
@@ -215,7 +234,75 @@ func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst 
 	return nil
 }
 
-func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
+var exprRegex = regexp.MustCompile(`\{\{(.+?)\}\}`)
+
+// evaluateString finds and evaluates all {{...}} expressions in a string
+func evaluateString(s string, env ConfigEnv) (string, error) {
+	matches := exprRegex.FindAllStringSubmatchIndex(s, -1)
+	if len(matches) == 0 {
+		return s, nil
+	}
+
+	var builder strings.Builder
+	lastIndex := 0
+
+	for _, matchIndexes := range matches {
+		fullMatchStart := matchIndexes[0]
+		fullMatchEnd := matchIndexes[1]
+		expressionStart := matchIndexes[2]
+		expressionEnd := matchIndexes[3]
+
+		builder.WriteString(s[lastIndex:fullMatchStart])
+
+		expression := strings.TrimSpace(s[expressionStart:expressionEnd])
+		program, err := expr.Compile(expression, expr.Env(env))
+		if err != nil {
+			return "", fmt.Errorf("failed to compile expression %q: %w", expression, err)
+		}
+
+		result, err := expr.Run(program, env)
+		if err != nil {
+			return "", fmt.Errorf("failed to run expression %q: %w", expression, err)
+		}
+
+		builder.WriteString(fmt.Sprintf("%v", result))
+		lastIndex = fullMatchEnd
+	}
+
+	builder.WriteString(s[lastIndex:])
+
+	return builder.String(), nil
+}
+
+// processExpressions recursively walks the parsed TOML data and evaluates expressions in strings
+func processExpressions(data any, env ConfigEnv) (any, error) {
+	switch v := data.(type) {
+	case map[string]any:
+		for key, val := range v {
+			processedVal, err := processExpressions(val, env)
+			if err != nil {
+				return nil, err
+			}
+			v[key] = processedVal
+		}
+		return v, nil
+	case []any:
+		for i, item := range v {
+			processedItem, err := processExpressions(item, env)
+			if err != nil {
+				return nil, err
+			}
+			v[i] = processedItem
+		}
+		return v, nil
+	case string:
+		return evaluateString(v, env)
+	default:
+		return data, nil
+	}
+}
+
+func ParseConfig(rdr io.Reader, env ConfigEnv) (*Config, error) {
 	var rawConfig map[string]any
 	dec := toml.NewDecoder(rdr)
 	if err := dec.Decode(&rawConfig); err != nil {
@@ -224,6 +311,12 @@ func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 		}
 		return nil, err
 	}
+
+	processedConfig, err := processExpressions(rawConfig, env)
+	if err != nil {
+		return nil, fmt.Errorf("error processing expressions in config: %w", err)
+	}
+	rawConfig = processedConfig.(map[string]any)
 
 	cfg := new(Config)
 	cfg.Profile = defaultProfiles
@@ -245,7 +338,7 @@ func ParseConfig(rdr io.Reader, env map[string]any) (*Config, error) {
 }
 
 // ParseConfigFromFile parses and validates a config file from a filepath
-func ParseConfigFromFile(path string, env map[string]any) (*Config, error) {
+func ParseConfigFromFile(path string, env ConfigEnv) (*Config, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
@@ -255,10 +348,95 @@ func ParseConfigFromFile(path string, env map[string]any) (*Config, error) {
 	return ParseConfig(bufio.NewReader(f), env)
 }
 
-func NewConfigEnv() map[string]any {
-	// TODO
-	return map[string]any{
-		"target_os":   runtime.GOOS,
-		"target_arch": runtime.GOARCH,
+//
+// expr-lang helpers
+//
+
+func (cfg Config) RunBuildScript(env ConfigEnv) error {
+	if cfg.Package.Build == "" {
+		return nil
 	}
+
+	program, err := expr.Compile(cfg.Package.Build, expr.Env(env))
+	if err != nil {
+		return fmt.Errorf("failed to compile build script for package %q: %w", cfg.Package.Name, err)
+	}
+	result, err := expr.Run(program, env)
+	if err != nil {
+		return fmt.Errorf("failed to run build script for package %q: %w", cfg.Package.Name, err)
+	}
+
+	if result, ok := result.(bool); !ok || !result {
+		return fmt.Errorf("build script for package %q returned false\n%s", cfg.Package.Name, cfg.Package.Build)
+	}
+
+	return nil
+}
+
+type ConfigEnv struct {
+	TargetOS   string            `expr:"target_os"`
+	TargetArch string            `expr:"target_arch"`
+	Environ    map[string]string `expr:"environ"`
+	basedir    string
+}
+
+func NewConfigEnv(basedir string) ConfigEnv {
+	environ := make(map[string]string)
+	for _, e := range os.Environ() {
+		if i := strings.Index(e, "="); i >= 0 {
+			environ[e[:i]] = e[i+1:]
+		}
+	}
+
+	return ConfigEnv{
+		TargetOS:   runtime.GOOS,
+		TargetArch: runtime.GOARCH,
+		Environ:    environ,
+		basedir:    basedir,
+	}
+}
+
+func (env ConfigEnv) Patch(path, patchText string) bool {
+	fullPath := filepath.Join(env.basedir, path)
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		panic(err)
+	}
+	origText := string(data)
+
+	dmp := diffmatchpatch.New()
+	patches, err := dmp.PatchFromText(patchText)
+	if err != nil {
+		panic(err)
+	}
+	patchedText, results := dmp.PatchApply(patches, origText)
+	for _, ok := range results {
+		if ok {
+			goto applied
+		}
+	}
+	return false // nothing was applied, nothing to write
+
+applied:
+	err = os.WriteFile(fullPath, []byte(patchedText), 0644)
+	if err != nil {
+		panic(err)
+	}
+
+	return true
+}
+
+func (env ConfigEnv) ReadFile(path string) (string, error) {
+	fullPath := filepath.Join(env.basedir, path)
+	_, err := filepath.Rel(env.basedir, fullPath)
+	if err != nil {
+		panic(fmt.Sprintf("path %q is outside of package directory %q", path, env.basedir))
+	}
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		panic(err)
+	}
+
+	return string(data), nil
 }

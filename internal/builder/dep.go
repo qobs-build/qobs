@@ -65,7 +65,8 @@ func fetchDependency(dep string, toWhere string) (string, error) {
 	}
 
 	// otherwise it's a path
-	return dep, nil
+	err := os.CopyFS(toWhere, os.DirFS(dep))
+	return dep, err
 }
 
 func isURL(maybeURL string) bool {

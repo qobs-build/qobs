@@ -138,7 +138,7 @@ func (g *NinjaGen) Generate() string {
 			write(&sb, "link")
 		}
 
-		// add the object files and dependencies of this project
+		// add the object files and dependencies of this package
 		for _, source := range target.sources {
 			write(&sb, " ", source.obj)
 		}
