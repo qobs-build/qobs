@@ -17,4 +17,4 @@ kooler = []
 defines = { KOOL = "" }
 
 [target.'feature("kooler")']
-defines = { KOOLER = "" } # ...and this will be defines instead
+defines = { KOOLER = "" } # ...and this will be defined instead

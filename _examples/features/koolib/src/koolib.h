@@ -1,5 +1,5 @@
-#ifndef HELLOWORLD_H
-#define HELLOWORLD_H
+#ifndef KOOLIB_H
+#define KOOLIB_H
 
 void koolib();
 
