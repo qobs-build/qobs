@@ -3,6 +3,7 @@ package builder
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -54,14 +55,20 @@ type Builder struct {
 	env     ConfigEnv
 }
 
-func NewBuilderInDirectory(path string) (*Builder, error) {
+func NewBuilderInDirectory(path string, features []string, defaultFeatures bool) (*Builder, error) {
 	var err error
 	path, err = filepath.Abs(path)
 	if err != nil {
 		return nil, err
 	}
-	env := NewConfigEnv(path)
-	cfg, err := ParseConfigFromFile(filepath.Join(path, "Qobs.toml"), env)
+
+	featureMap := make(map[string]bool)
+	for _, feature := range features {
+		featureMap[feature] = true
+	}
+
+	env := NewConfigEnvWithFeatures(path, featureMap)
+	cfg, err := ParseConfigFromFile(filepath.Join(path, "Qobs.toml"), env, defaultFeatures)
 	if err != nil {
 		return nil, err
 	}
@@ -74,14 +81,10 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 	processed := make(map[string]bool)
 
 	// process the root package first
-	rootConfig, err := ParseConfigFromFile(filepath.Join(rootPath, "Qobs.toml"), b.env)
-	if err != nil {
-		return nil, err
-	}
 	rootPackage := &Package{
-		Name:   rootConfig.Package.Name,
+		Name:   b.cfg.Package.Name,
 		Path:   rootPath,
-		Config: rootConfig,
+		Config: b.cfg,
 		IsRoot: true,
 	}
 	packages[rootPackage.Name] = rootPackage
@@ -100,15 +103,15 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 			continue
 		}
 
-		// we need to find the dependency source from a package that lists it
-		var depSource string
+		// we need to find the dependency source and features from a package that lists it
+		var dep Dependency
 		for _, p := range packages {
-			if src, ok := p.Config.Dependencies[depName]; ok {
-				depSource = src
+			if d, ok := p.Config.Dependencies[depName]; ok {
+				dep = d
 				break
 			}
 		}
-		if depSource == "" {
+		if dep.Source == "" {
 			return nil, fmt.Errorf("could not find source for dependency: %s", depName)
 		}
 
@@ -120,13 +123,20 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 			if err := os.MkdirAll(depPath, 0755); err != nil && !os.IsExist(err) {
 				return nil, err
 			}
-			if _, err := fetchDependency(depSource, depPath); err != nil {
+			if _, err := fetchDependency(dep.Source, depPath); err != nil {
 				return nil, fmt.Errorf("failed to fetch dependency %s: %w", depName, err)
 			}
 		}
 
+		// clone dependency-specific env
+		depEnv := b.env
+		depEnv.Features = maps.Clone(b.env.Features)
+		for _, feature := range dep.Features {
+			depEnv.Features[feature] = true
+		}
+
 		// parse its config and add it to the graph
-		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"), b.env)
+		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"), depEnv, dep.DefaultFeatures)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse config for dependency %s: %w", depName, err)
 		}

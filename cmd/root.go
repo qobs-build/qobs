@@ -11,8 +11,10 @@ import (
 )
 
 var (
-	flagProfile   string
-	flagGenerator EnumValue = NewEnumValue("qobs", map[string]string{
+	flagProfile           string
+	flagFeatures          []string
+	flagNoDefaultFeatures bool
+	flagGenerator         EnumValue = NewEnumValue("qobs", map[string]string{
 		"qobs":   "Use Qobs's builder (default)",
 		"ninja":  "Generates build.ninja files",
 		"vs2022": "Generates Visual Studio 2022 project files",
@@ -24,7 +26,7 @@ func doBuild(cmd *cobra.Command, args []string) {
 	if len(args) > 0 {
 		target = args[0]
 	}
-	b, err := builder.NewBuilderInDirectory(target)
+	b, err := builder.NewBuilderInDirectory(target, flagFeatures, !flagNoDefaultFeatures)
 	if err != nil {
 		msg.Fatal("%v", err)
 	}
@@ -59,6 +61,8 @@ func init() {
 
 func addBuildFlags(cmd *cobra.Command) {
 	cmd.Flags().StringVarP(&flagProfile, "profile", "p", "debug", "Build with the given profile")
+	cmd.Flags().StringSliceVarP(&flagFeatures, "features", "f", []string{}, "Comma separated list of features to activate")
+	cmd.Flags().BoolVar(&flagNoDefaultFeatures, "no-default-features", false, "Disable default features")
 	cmd.Flags().VarP(&flagGenerator, "gen", "g", "Generator to build with, one of "+flagGenerator.HelpString())
 	cmd.RegisterFlagCompletionFunc("gen", flagGenerator.CompletionFunc())
 }

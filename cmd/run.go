@@ -13,7 +13,7 @@ func doRun(cmd *cobra.Command, args []string) {
 		target = args[0]
 		args = args[1:] // other arguments will be passed to program
 	}
-	b, err := builder.NewBuilderInDirectory(target)
+	b, err := builder.NewBuilderInDirectory(target, flagFeatures, !flagNoDefaultFeatures)
 	if err != nil {
 		msg.Fatal("%v", err)
 	}

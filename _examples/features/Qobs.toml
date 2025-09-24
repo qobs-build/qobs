@@ -1,0 +1,25 @@
+[package]
+name = "features"
+description = "[features] section demo"
+authors = ["zeozeozeo"]
+
+[target]
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+
+[features]
+default = ["dogs"]
+cats = []
+dogs = ["cats"]
+whales = []
+
+[target.'feature("dogs")']
+defines = { "DOGS" = "" }
+
+[target.'feature("cats")']
+defines = { "CATS" = "" }
+
+[target.'feature("whales")']
+defines = { "WHALES" = "" }
+
+[target.'feature("cats") && feature("dogs")']
+defines = { "CATS_AND_DOGS" = "" }
