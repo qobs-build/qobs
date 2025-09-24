@@ -6,8 +6,11 @@ authors = ["zeozeozeo"]
 [target]
 sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
 
+[dependencies]
+koolib = { dep = "koolib", default-features = false } # disable default koolib/kool feature
+
 [features]
-default = ["dogs"]
+default = ["dogs", "koolib/kooler"]
 cats = []
 dogs = ["cats"]
 whales = []

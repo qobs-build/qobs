@@ -27,11 +27,12 @@ var defaultProfiles = map[string]ProfileSection{
 }
 
 type Config struct {
-	Package      PackageSection            `toml:"package"`
-	Target       TargetSection             `toml:"target"`
-	Dependencies map[string]Dependency     `toml:"dependencies"`
-	Profile      map[string]ProfileSection `toml:"profile"`
-	Features     FeaturesSection           `toml:"features"`
+	Package            PackageSection            `toml:"package"`
+	Target             TargetSection             `toml:"target"`
+	Dependencies       map[string]Dependency     `toml:"dependencies"`
+	Profile            map[string]ProfileSection `toml:"profile"`
+	Features           FeaturesSection           `toml:"features"`
+	enabledDepFeatures map[string][]string
 }
 
 func (c Config) Profiles() []string {
@@ -134,9 +135,14 @@ func (d *Dependency) UnmarshalTOML(v any) error {
 // FeaturesSection defines the [features] section
 type FeaturesSection map[string][]string
 
-func (f FeaturesSection) ResolveFeatures(requested []string, useDefault bool) (map[string]bool, error) {
-	enabled := make(map[string]bool)
-	queue := requested
+func (f FeaturesSection) ResolveFeatures(requested []string, useDefault bool) (
+	ownFeatures map[string]bool,
+	depFeatures map[string][]string,
+	err error,
+) {
+	ownFeatures = make(map[string]bool)
+	depFeatures = make(map[string][]string)
+	queue := slices.Clone(requested)
 
 	if useDefault {
 		if defaultFeatures, ok := f["default"]; ok {
@@ -148,21 +154,28 @@ func (f FeaturesSection) ResolveFeatures(requested []string, useDefault bool) (m
 		feature := queue[0]
 		queue = queue[1:]
 
-		if _, exists := enabled[feature]; exists {
+		// handle `dep/feature` syntax
+		if parts := strings.SplitN(feature, "/", 2); len(parts) == 2 {
+			depName, featureName := parts[0], parts[1]
+			if !slices.Contains(depFeatures[depName], featureName) {
+				depFeatures[depName] = append(depFeatures[depName], featureName)
+			}
 			continue
 		}
 
-		subFeatures := f[feature]
-		enabled[feature] = true
+		// feature is for the current package
+		if _, exists := ownFeatures[feature]; exists {
+			continue
+		}
+		ownFeatures[feature] = true
 
-		for _, sub := range subFeatures {
-			if _, exists := enabled[sub]; !exists {
-				queue = append(queue, sub)
-			}
+		// if this feature enables other features, add them to the queue
+		if subFeatures, ok := f[feature]; ok {
+			queue = append(queue, subFeatures...)
 		}
 	}
 
-	return enabled, nil
+	return ownFeatures, depFeatures, nil
 }
 
 // mergeStructs merges the fields of the src struct into the dst struct
@@ -391,7 +404,7 @@ func ParseConfig(rdr io.Reader, env ConfigEnv, defaultFeatures bool) (*Config, e
 			requestedFeatures = append(requestedFeatures, feature)
 		}
 	}
-	enabledFeatures, err := featuresSection.ResolveFeatures(requestedFeatures, defaultFeatures)
+	enabledFeatures, depFeatures, err := featuresSection.ResolveFeatures(requestedFeatures, defaultFeatures)
 	if err != nil {
 		return nil, err
 	}
@@ -410,6 +423,7 @@ func ParseConfig(rdr io.Reader, env ConfigEnv, defaultFeatures bool) (*Config, e
 	cfg := new(Config)
 	cfg.Profile = defaultProfiles
 	cfg.Features = featuresSection
+	cfg.enabledDepFeatures = depFeatures
 
 	if err := unmarshalSection(rawConfig, "package", &cfg.Package); err != nil {
 		return nil, err

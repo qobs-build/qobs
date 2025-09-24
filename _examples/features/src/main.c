@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "koolib.h"
 
 int main(void) {
 #ifdef CATS
@@ -16,5 +17,6 @@ int main(void) {
 #if !defined(CATS) && !defined(DOGS) && !defined(WHALES)
     puts("no features are enabled");
 #endif
+    koolib();
     return 0;
 }

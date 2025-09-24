@@ -1,0 +1,20 @@
+[package]
+name = "koolib"
+description = "Set dependency features"
+authors = ["zeozeozeo"]
+
+[target]
+lib = true
+sources = ["src/**.cpp", "src/**.cc", "src/**.c"]
+headers = ["src/**.hpp", "src/**.h"]
+
+[features]
+default = ["kool"] # this will be disabled in the example...
+kool = []
+kooler = []
+
+[target.'feature("kool")']
+defines = { KOOL = "" }
+
+[target.'feature("kooler")']
+defines = { KOOLER = "" } # ...and this will be defines instead

@@ -77,10 +77,8 @@ func NewBuilderInDirectory(path string, features []string, defaultFeatures bool)
 
 func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string]*Package, error) {
 	packages := make(map[string]*Package)
-	var queue []string
-	processed := make(map[string]bool)
+	depSpecs := make(map[string]Dependency)
 
-	// process the root package first
 	rootPackage := &Package{
 		Name:   b.cfg.Package.Name,
 		Path:   rootPath,
@@ -88,31 +86,23 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 		IsRoot: true,
 	}
 	packages[rootPackage.Name] = rootPackage
-	processed[rootPackage.Name] = true
 
-	// populate the initial queue
-	for name := range rootPackage.Config.Dependencies {
+	// pass 1: resolve dependencies
+	queue := make([]string, 0)
+	for name, dep := range b.cfg.Dependencies {
+		depSpecs[name] = dep
 		queue = append(queue, name)
 	}
 
-	for len(queue) > 0 {
-		depName := queue[0]
-		queue = queue[1:]
-
-		if _, exists := processed[depName]; exists {
+	for i := 0; i < len(queue); i++ {
+		depName := queue[i]
+		if _, exists := packages[depName]; exists {
 			continue
 		}
 
-		// we need to find the dependency source and features from a package that lists it
-		var dep Dependency
-		for _, p := range packages {
-			if d, ok := p.Config.Dependencies[depName]; ok {
-				dep = d
-				break
-			}
-		}
-		if dep.Source == "" {
-			return nil, fmt.Errorf("could not find source for dependency: %s", depName)
+		depSpec, ok := depSpecs[depName]
+		if !ok {
+			return nil, fmt.Errorf("internal error: dependency %q has no section", depName)
 		}
 
 		depPath := filepath.Join(depsDir, depName)
@@ -123,40 +113,78 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 			if err := os.MkdirAll(depPath, 0755); err != nil && !os.IsExist(err) {
 				return nil, err
 			}
-			if _, err := fetchDependency(dep.Source, depPath); err != nil {
-				return nil, fmt.Errorf("failed to fetch dependency %s: %w", depName, err)
+			if _, err := fetchDependency(depSpec.Source, depPath); err != nil {
+				return nil, fmt.Errorf("failed to fetch dependency %q: %w", depName, err)
 			}
 		}
 
-		// clone dependency-specific env
-		depEnv := b.env
-		depEnv.Features = maps.Clone(b.env.Features)
-		for _, feature := range dep.Features {
-			depEnv.Features[feature] = true
-		}
-
-		// parse its config and add it to the graph
-		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"), depEnv, dep.DefaultFeatures)
+		// parse config with no features
+		env := NewConfigEnv(depPath)
+		depConfig, err := ParseConfigFromFile(filepath.Join(depPath, "Qobs.toml"), env, false)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse config for dependency %s: %w", depName, err)
+			return nil, fmt.Errorf("failed to parse initial config for dependency %q: %w", depName, err)
 		}
 
 		if depConfig.Package.Name != depName {
-			msg.Warn("dependency `%s` has a mismatched package name: `%s`", depName, depConfig.Package.Name)
+			msg.Warn("dependency %q has a mismatched package name: %q", depName, depConfig.Package.Name)
 		}
 
-		depPkg := &Package{
+		packages[depName] = &Package{
 			Name:   depConfig.Package.Name,
 			Path:   depPath,
 			Config: depConfig,
 		}
-		packages[depPkg.Name] = depPkg
-		processed[depPkg.Name] = true
 
-		// add its dependencies to the queue
-		for name := range depPkg.Config.Dependencies {
-			if !processed[name] {
-				queue = append(queue, name)
+		for name, dep := range depConfig.Dependencies {
+			if _, ok := depSpecs[name]; !ok {
+				depSpecs[name] = dep
+			}
+			queue = append(queue, name)
+		}
+	}
+
+	// pass 2: resolve features
+	finalFeatures := make(map[string]map[string]bool)
+	finalFeatures[b.cfg.Package.Name] = b.env.Features
+
+	changed := true
+	for changed {
+		changed = false
+
+		for pkgName, pkg := range packages {
+			if pkg.IsRoot {
+				continue
+			}
+
+			requestedFeatures := make(map[string]bool)
+			useDefaultFeatures := false
+
+			for _, parentPkg := range packages {
+				if dep, isDependency := parentPkg.Config.Dependencies[pkgName]; isDependency {
+					if dep.DefaultFeatures {
+						useDefaultFeatures = true
+					}
+					for _, f := range dep.Features {
+						requestedFeatures[f] = true
+					}
+					if parentPkg.Config.enabledDepFeatures != nil {
+						for _, f := range parentPkg.Config.enabledDepFeatures[pkgName] {
+							requestedFeatures[f] = true
+						}
+					}
+				}
+			}
+
+			if !maps.Equal(finalFeatures[pkgName], requestedFeatures) {
+				changed = true
+				finalFeatures[pkgName] = requestedFeatures
+
+				env := NewConfigEnvWithFeatures(pkg.Path, requestedFeatures)
+				newConfig, err := ParseConfigFromFile(filepath.Join(pkg.Path, "Qobs.toml"), env, useDefaultFeatures)
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse config for package %q: %w", pkgName, err)
+				}
+				pkg.Config = newConfig
 			}
 		}
 	}
