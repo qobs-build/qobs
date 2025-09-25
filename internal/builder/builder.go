@@ -262,7 +262,7 @@ func (b *Builder) makeCflags(profile string) ([]string, error) {
 		}
 		return cflags, nil
 	}
-	return nil, fmt.Errorf("unknown profile `%s`, known profiles: %s", profile, strings.Join(b.cfg.Profiles(), ", "))
+	return nil, fmt.Errorf("unknown profile %q, known profiles: %s", profile, strings.Join(b.cfg.Profiles(), ", "))
 }
 
 // Build resolves the entire dependency graph and then invokes the generator (or builder)
@@ -319,20 +319,27 @@ func (b *Builder) Build(profile, generator string) error {
 		for depName := range pkg.Config.Dependencies {
 			dep, ok := packages[depName]
 			if !ok {
-				return fmt.Errorf("internal error: resolved dependency `%s` not found in package map", depName)
+				return fmt.Errorf("internal error: resolved dependency %q not found in package map", depName)
 			}
-			if !dep.Config.Target.Lib {
-				return fmt.Errorf("package `%s` depends on `%s`, which is not a library (target.lib = false)", pkg.Name, dep.Name)
-			}
-			depOutputs = append(depOutputs, dep.outputName())
 
 			depHeaders, err := b.collectFiles(dep, dep.Config.Target.Headers, true)
 			if err != nil {
-				return fmt.Errorf("failed to collect headers for dependency %s: %w", dep.Name, err)
+				return fmt.Errorf("failed to collect headers for dependency %q: %w", dep.Name, err)
 			}
 			for _, includePath := range depHeaders {
 				cflags = append(cflags, "-I"+includePath)
 			}
+
+			// don't produce link artifacts for header-only deps
+			if dep.Config.Target.HeaderOnly {
+				continue
+			}
+
+			if !dep.Config.Target.Lib {
+				return fmt.Errorf("package %q depends on %q, which is not a library (target.lib = false)", pkg.Name, dep.Name)
+			}
+
+			depOutputs = append(depOutputs, dep.outputName())
 		}
 
 		// build ldflags
@@ -363,7 +370,7 @@ func (b *Builder) Build(profile, generator string) error {
 
 		for define, v := range pkg.Config.Target.Defines {
 			if v != "" {
-				cflags = append(cflags, "-D"+define+`="`+v+`"`)
+				cflags = append(cflags, "-D"+define+"="+v) // TODO: escape this?
 			} else {
 				cflags = append(cflags, "-D"+define)
 			}
@@ -377,15 +384,17 @@ func (b *Builder) Build(profile, generator string) error {
 			return err
 		}
 
-		g.AddTarget(
-			pkg.outputName(),
-			pkg.Path,
-			sources,
-			depOutputs,
-			pkg.Config.Target.Lib,
-			cflags,
-			ldflags,
-		)
+		if !pkg.Config.Target.HeaderOnly {
+			g.AddTarget(
+				pkg.outputName(),
+				pkg.Path,
+				sources,
+				depOutputs,
+				pkg.Config.Target.Lib,
+				cflags,
+				ldflags,
+			)
+		}
 	}
 
 	if rootPkg == nil {

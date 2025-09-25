@@ -90,12 +90,13 @@ type PackageSection struct {
 
 // TargetSection defines the [target(.*)] section
 type TargetSection struct {
-	Lib     bool              `toml:"lib"`
-	Sources []string          `toml:"sources"`
-	Headers []string          `toml:"headers"`
-	Defines map[string]string `toml:"defines"`
-	Links   []string          `toml:"links"`
-	Cflags  []string          `toml:"cflags"`
+	Lib        bool              `toml:"lib"`
+	HeaderOnly bool              `toml:"header-only"`
+	Sources    []string          `toml:"sources"`
+	Headers    []string          `toml:"headers"`
+	Defines    map[string]string `toml:"defines"`
+	Links      []string          `toml:"links"`
+	Cflags     []string          `toml:"cflags"`
 }
 
 type Dependency struct {
@@ -276,6 +277,14 @@ func unmarshalConditionalSection[T any](rawCfg map[string]any, name string, dst 
 				baseFields[key] = val
 			}
 		} else {
+			// HACK: would be great to have go-toml recognize the UnmarshalTOML method :/
+			if name == "dependencies" {
+				if s, ok := val.(string); ok {
+					baseFields[key] = map[string]any{"dep": s}
+					continue
+				}
+			}
+
 			baseFields[key] = val
 		}
 	}

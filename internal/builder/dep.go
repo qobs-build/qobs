@@ -138,7 +138,7 @@ func cloneGitRepo(url, toWhere string) (string, error) {
 		revision := parsedURL.commitOrTag
 		hash, err := repo.ResolveRevision(plumbing.Revision(revision))
 		if err != nil {
-			return toWhere, fmt.Errorf("could not resolve revision `%s`: %w", revision, err)
+			return toWhere, fmt.Errorf("could not resolve revision %q: %w", revision, err)
 		}
 
 		err = w.Checkout(&git.CheckoutOptions{
@@ -146,7 +146,7 @@ func cloneGitRepo(url, toWhere string) (string, error) {
 			Force: true,
 		})
 		if err != nil {
-			return toWhere, fmt.Errorf("failed to checkout `%s`: %w", revision, err)
+			return toWhere, fmt.Errorf("failed to checkout %q: %w", revision, err)
 		}
 	}
 

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -230,12 +231,13 @@ func (g *QobsBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []co
 // executeBuild runs the planned compile and link jobs and updates the build state
 func (g *QobsBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob) error {
 	if err := runJobs(compileJobs, runCompileJob, g.jobs, 0, len(compileJobs)+len(linkJobs)); err != nil {
-		return fmt.Errorf("compilation failed: %w", err)
+		fmt.Print(err.Error())
+		return nil
 	}
 	if err := runJobs(linkJobs, runLinkJob, g.jobs, len(compileJobs), len(compileJobs)+len(linkJobs)); err != nil {
-		return fmt.Errorf("linking failed: %w", err)
+		fmt.Print(err.Error())
+		return nil
 	}
-	fmt.Println()
 
 	for _, job := range linkJobs {
 		target, ok := g.targets[job.name]
@@ -319,7 +321,7 @@ func (g *QobsBuilder) topologicalSortTargets() ([]string, error) {
 	for name, target := range g.targets {
 		for _, depName := range target.dependencies {
 			if _, ok := g.targets[depName]; !ok {
-				return nil, fmt.Errorf("target `%s` lists a non-existent dependency: `%s`", name, depName)
+				return nil, fmt.Errorf("target %q lists a non-existent dependency: %q", name, depName)
 			}
 
 			graph[depName] = append(graph[depName], name)
@@ -444,6 +446,7 @@ func runJobs[T any](jobs []T, jobfunc func(job T, done, total int) error, limit,
 	eg, _ := errgroup.WithContext(context.Background())
 	eg.SetLimit(limit)
 
+	defer fmt.Println()
 	for i, job := range jobs {
 		eg.Go(func() error {
 			return jobfunc(job, start+i+1, total)
@@ -463,12 +466,14 @@ func runCompileJob(job compileJob, done, total int) error {
 	args = append(args, job.cflags...)
 	args = append(args, "-c", job.src, "-o", job.obj)
 
-	cmd := exec.Command(job.cc, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
 	fmt.Printf("%s[%d/%d] CC %s", sameLine, done, total, job.src)
-	return cmd.Run()
+	cmd := exec.Command(job.cc, args...)
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return errors.New(string(output))
+	}
+	return nil
 }
 
 // runLinkJob runs a single linking job
@@ -478,22 +483,23 @@ func runLinkJob(job linkJob, done, total int) error {
 		args := []string{"rcs", job.out}
 		args = append(args, job.objs...)
 
-		cmd = exec.Command("ar", args...)
 		fmt.Printf("%s[%d/%d] AR %s", sameLine, done, total, job.out)
+		cmd = exec.Command("ar", args...)
 	} else {
 		args := []string{"-o", job.out}
 		args = append(args, job.objs...)
 		args = append(args, job.deps...)
 		args = append(args, job.ldflags...)
 
-		cmd = exec.Command(job.cc, args...)
 		fmt.Printf("%s[%d/%d] LINK %s", sameLine, done, total, job.out)
+		cmd = exec.Command(job.cc, args...)
 	}
 
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return errors.New(string(output))
+	}
+	return nil
 }
 
 // updateBuildState updates the build state for a target after a successful build

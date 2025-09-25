@@ -11,8 +11,8 @@ github.com/bmatcuk/doublestar/v4 v4.9.1/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTS
 github.com/cloudflare/circl v1.6.1 h1:zqIqSPIndyBh1bjLVVDHMPpVKqp8Su/V+6MeDzzQBQ0=
 github.com/cloudflare/circl v1.6.1/go.mod h1:uddAzsPgqdMAYatqJ0lsjX1oECcQLIlRpzZh3pJrofs=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
-github.com/cyphar/filepath-securejoin v0.4.1 h1:JyxxyPEaktOD+GAnqIqTf9A8tHyAG22rowi7HkoSU1s=
-github.com/cyphar/filepath-securejoin v0.4.1/go.mod h1:Sdj7gXlvMcPZsbhwhQ33GguGLDGQL7h7bg04C/+u9jI=
+github.com/cyphar/filepath-securejoin v0.5.0 h1:hIAhkRBMQ8nIeuVwcAoymp7MY4oherZdAxD+m0u9zaw=
+github.com/cyphar/filepath-securejoin v0.5.0/go.mod h1:Sdj7gXlvMcPZsbhwhQ33GguGLDGQL7h7bg04C/+u9jI=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
@@ -32,8 +32,8 @@ github.com/go-git/go-billy/v6 v6.0.0-20250906064328-0118fd22f1d9 h1:eGuqmy/d/UAy
 github.com/go-git/go-billy/v6 v6.0.0-20250906064328-0118fd22f1d9/go.mod h1:YHaZW7f/lRfWtqV0WlobVJaVjE3oWbY2t7pCrAgwjoc=
 github.com/go-git/go-git-fixtures/v5 v5.1.0 h1:b8cWxDLTk0s09Ihm9x1HvNGUzxUVlRwIH7EAM0gGDKg=
 github.com/go-git/go-git-fixtures/v5 v5.1.0/go.mod h1:CdmU0oQeDuy4Xh8V0i9Ym+vsTkgDDPKEiofBFEVT+aE=
-github.com/go-git/go-git/v6 v6.0.0-20250923192830-1ad5b9c7da82 h1:UkmsHb3Lw70N9CrPwJQ7vz6qFt1b2DTNflceIYqvYLk=
-github.com/go-git/go-git/v6 v6.0.0-20250923192830-1ad5b9c7da82/go.mod h1:Y0VMP4A1sh7BXZQFQBM5DJVRetrmT8//SYXtFYwCKf4=
+github.com/go-git/go-git/v6 v6.0.0-20250925074055-d7f8ecf1cfc8 h1:rOjBs/eOGLJInhN5uXM6naGf1CZZ+vgoyh4iMJs3cj0=
+github.com/go-git/go-git/v6 v6.0.0-20250925074055-d7f8ecf1cfc8/go.mod h1:d6/Dw5g7KpyCrCh03FHLYCqA1ZAlFCqkc2Wu+a5Sqlg=
 github.com/go-ole/go-ole v1.3.0 h1:Dt6ye7+vXGIKZ7Xtk4s6/xVdGDQynvom7xCFEdWr6uE=
 github.com/go-ole/go-ole v1.3.0/go.mod h1:5LS6F96DhAwUc7C+1HLexzMXY1xGRSryjyPPKW6zv78=
 github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 h1:f+oWsMOmNPc8JmEHVZIycC7hBoQxHH9pNKQORJNozsQ=
