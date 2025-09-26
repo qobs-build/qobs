@@ -111,10 +111,7 @@ func (b *Builder) resolveBuildGraph(rootPath string, depsDir string) (map[string
 		// fetch dependency if it doesn't exist
 		stat, err := os.Stat(depPath)
 		if os.IsNotExist(err) || !stat.IsDir() {
-			if err := os.MkdirAll(depPath, 0755); err != nil && !os.IsExist(err) {
-				return nil, err
-			}
-			if _, err := fetchDependency(depSpec.Source, depPath); err != nil {
+			if _, err := fetchDependency(depSpec.Source, b.basedir, &depPath); err != nil {
 				return nil, fmt.Errorf("failed to fetch dependency %q: %w", depName, err)
 			}
 		}

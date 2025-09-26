@@ -37,36 +37,46 @@ var (
 	errIllegalDep = errors.New("empty or illegal dependency string")
 )
 
-func fetchDependency(dep string, toWhere string) (string, error) {
+func fetchDependency(dep, basedir string, toWhere *string) (string, error) {
 	if dep == "" {
 		return "", errIllegalDep
+	}
+
+	ensureDir := func() {
+		if err := os.MkdirAll(*toWhere, 0755); err != nil && !os.IsExist(err) {
+			msg.Fatal("%v", err)
+		}
 	}
 
 	// check for `git:` prefix, e.g. git:https://github.com/zeozeozeo/libhelloworld.git
 	const gitPrefix = "git:"
 	if strings.HasPrefix(dep, gitPrefix) {
-		return cloneGitRepo(dep[len(gitPrefix):], toWhere)
+		ensureDir()
+		return cloneGitRepo(dep[len(gitPrefix):], *toWhere)
 	}
 	// or suffix
 	if strings.HasSuffix(dep, ".git") {
-		return cloneGitRepo(dep, toWhere)
+		ensureDir()
+		return cloneGitRepo(dep, *toWhere)
 	}
 
 	// check for shortcut prefix, e.g. gh:zeozeozeo/libhelloworld
 	for shortcut, url := range depShortcuts {
 		if strings.HasPrefix(dep, shortcut) {
-			return cloneGitRepo(url+dep[len(shortcut):], toWhere)
+			ensureDir()
+			return cloneGitRepo(url+dep[len(shortcut):], *toWhere)
 		}
 	}
 
 	// if it's a URL, it should be an archive
 	if isURL(dep) {
-		return downloadAndExtractArchive(dep, toWhere)
+		ensureDir()
+		return downloadAndExtractArchive(dep, *toWhere)
 	}
 
 	// otherwise it's a path
-	err := os.CopyFS(toWhere, os.DirFS(dep))
-	return dep, err
+	*toWhere = filepath.Join(basedir, dep)
+	return dep, nil
 }
 
 func isURL(maybeURL string) bool {
