@@ -1,6 +1,7 @@
 package builder
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -265,6 +266,26 @@ func (b *Builder) makeCflags(profile string) ([]string, error) {
 	return nil, fmt.Errorf("unknown profile %q, known profiles: %s", profile, strings.Join(b.cfg.Profiles(), ", "))
 }
 
+func isCxx(path string) bool {
+	ext := filepath.Ext(filepath.Base(path))
+	return ext == ".cpp" || ext == ".cc" || ext == ".c++" || ext == ".cxx"
+}
+
+func getObjectPath(pkgName, pkgPath, srcPath string) (string, error) {
+	rel, err := filepath.Rel(pkgPath, srcPath)
+	if err != nil {
+		rel = filepath.Base(srcPath)
+	}
+	return filepath.ToSlash(filepath.Join("QobsFiles", pkgName+".dir", rel+".obj")), nil
+}
+
+type jsonCompileCommand struct {
+	Directory string   `json:"directory"`
+	File      string   `json:"file"`
+	Arguments []string `json:"arguments"`
+	Output    string   `json:"output"`
+}
+
 // Build resolves the entire dependency graph and then invokes the generator (or builder)
 func (b *Builder) Build(profile, generator string) error {
 	buildDir := filepath.Join(b.basedir, "build")
@@ -286,6 +307,11 @@ func (b *Builder) Build(profile, generator string) error {
 
 	g := createGenerator(generator)
 	var rootPkg *Package
+	var compileCommands []jsonCompileCommand
+
+	cc := findCompiler(false)
+	cxx := findCompiler(true)
+	g.SetCompiler(cc, cxx)
 
 	// add targets
 	for _, pkg := range packages {
@@ -384,11 +410,46 @@ func (b *Builder) Build(profile, generator string) error {
 			return err
 		}
 
+		targetSources := make([]gen.SourceFile, 0, len(sources))
+
+		for _, srcPath := range sources {
+			objPath, err := getObjectPath(pkg.outputName(), pkg.Path, srcPath)
+			if err != nil {
+				msg.Warn("could not determine object path for %q: %v", srcPath, err)
+				continue
+			}
+
+			absoluteObjPath := filepath.Join(buildDir, objPath)
+
+			isCxxSource := isCxx(srcPath)
+			targetSources = append(targetSources, gen.SourceFile{
+				Src:   srcPath,
+				Obj:   objPath,
+				IsCxx: isCxxSource,
+			})
+
+			compiler := cc
+			if isCxxSource {
+				compiler = cxx
+			}
+
+			args := []string{compiler}
+			args = append(args, cflags...)
+			args = append(args, "-c", srcPath, "-o", absoluteObjPath)
+
+			compileCommands = append(compileCommands, jsonCompileCommand{
+				Directory: buildDir,
+				File:      srcPath,
+				Arguments: args,
+				Output:    absoluteObjPath,
+			})
+		}
+
 		if !pkg.Config.Target.HeaderOnly {
 			g.AddTarget(
 				pkg.outputName(),
 				pkg.Path,
-				sources,
+				targetSources,
 				depOutputs,
 				pkg.Config.Target.Lib,
 				cflags,
@@ -401,14 +462,22 @@ func (b *Builder) Build(profile, generator string) error {
 		return errors.New("internal error: root package not found after graph resolution")
 	}
 
-	// generate the buildfile
-	g.SetCompiler(findCompiler(false), findCompiler(true))
-
 	out := g.Generate()
 	if out != "" {
 		buildFile := filepath.Join(buildDir, g.BuildFile())
 		if err = os.WriteFile(buildFile, []byte(out), 0644); err != nil {
 			return err
+		}
+	}
+
+	if len(compileCommands) > 0 {
+		jsonData, err := json.MarshalIndent(compileCommands, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to generate compile_commands.json: %w", err)
+		}
+		ccPath := filepath.Join(buildDir, "compile_commands.json")
+		if err := os.WriteFile(ccPath, jsonData, 0644); err != nil {
+			return fmt.Errorf("failed to write compile_commands.json: %w", err)
 		}
 	}
 

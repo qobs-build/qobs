@@ -169,13 +169,9 @@ func (g *VS2022Gen) BuildFile() string {
 	return solutionName + ".sln"
 }
 
-func (g *VS2022Gen) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
+func (g *VS2022Gen) AddTarget(name, basedir string, sources []SourceFile, dependencies []string, isLib bool, cflags, ldflags []string) {
 	if g.targets == nil {
 		g.targets = make(map[string]buildUnit)
-	}
-	targetSources := make([]sourceFile, 0, len(sources))
-	for _, srcPath := range sources {
-		targetSources = append(targetSources, sourceFile{src: srcPath, isCxx: isCxx(srcPath)})
 	}
 
 	// since the builder passes the name prefixed with .lib/.a/.exe we need to remove it
@@ -189,7 +185,7 @@ func (g *VS2022Gen) AddTarget(name, basedir string, sources, dependencies []stri
 	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,
-		sources:      targetSources,
+		sources:      sources,
 		dependencies: cleanedDependencies,
 		cflags:       cflags,
 		ldflags:      ldflags,
@@ -267,7 +263,7 @@ func (g *VS2022Gen) generateSolutionFile(projectGuids map[string]string) string 
 func (g *VS2022Gen) generateProjectFile(buildDir, projectDir, name string, target buildUnit, projectGuids map[string]string) error {
 	clCompiles := make([]VSClCompile, 0, len(target.sources))
 	for _, source := range target.sources {
-		relPath, _ := filepath.Rel(projectDir, source.src)
+		relPath, _ := filepath.Rel(projectDir, source.Src)
 		clCompiles = append(clCompiles, VSClCompile{Include: relPath})
 	}
 
@@ -434,7 +430,7 @@ func (g *VS2022Gen) createItemDefinitionGroups(target buildUnit) []VSItemDefinit
 func (g *VS2022Gen) generateFiltersFile(projectDir, name string, target buildUnit) error {
 	clCompiles := make([]VSFiltersClCompile, 0, len(target.sources))
 	for _, source := range target.sources {
-		relPath, _ := filepath.Rel(projectDir, source.src)
+		relPath, _ := filepath.Rel(projectDir, source.Src)
 		clCompiles = append(clCompiles, VSFiltersClCompile{Include: relPath, Filter: "Source Files"})
 	}
 	filters := VSFiltersProject{

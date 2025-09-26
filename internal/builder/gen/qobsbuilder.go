@@ -80,23 +80,11 @@ func (g *QobsBuilder) BuildFile() string {
 }
 
 // AddTarget adds a package (library or executable) to the build graph
-func (g *QobsBuilder) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
-	targetSources := make([]sourceFile, 0, len(sources))
-	for _, srcPath := range sources {
-		rel, err := filepath.Rel(basedir, srcPath)
-		if err != nil {
-			rel = filepath.Base(srcPath)
-			msg.Warn("source file %s is outside of base directory %s", srcPath, basedir)
-		}
-
-		objPath := filepath.Join("QobsFiles", name+".dir", rel+".obj")
-		targetSources = append(targetSources, sourceFile{src: srcPath, obj: objPath, isCxx: isCxx(srcPath)})
-	}
-
+func (g *QobsBuilder) AddTarget(name, basedir string, sources []SourceFile, dependencies []string, isLib bool, cflags, ldflags []string) {
 	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,
-		sources:      targetSources,
+		sources:      sources,
 		dependencies: dependencies,
 		cflags:       cflags,
 		ldflags:      ldflags,
@@ -187,23 +175,23 @@ func (g *QobsBuilder) planBuild(sortedTargetNames []string) (allCompileJobs []co
 		// determine which source files in this target are dirty
 		var targetCompileJobs []compileJob
 		for _, src := range target.sources {
-			objPath := filepath.Join(g.buildDir, src.obj)
+			absoluteObjPath := filepath.Join(g.buildDir, src.Obj)
 
 			// check if source is dirty
-			isDirty, err := g.isSourceFileDirty(src, objPath, oldState)
+			isDirty, err := g.isSourceFileDirty(src, absoluteObjPath, oldState)
 			if err != nil {
-				return nil, nil, fmt.Errorf("could not check status of %s: %w", src.src, err)
+				return nil, nil, fmt.Errorf("could not check status of %s: %w", src.Src, err)
 			}
 			if isDirty {
 				compiler := g.cc
-				if src.isCxx {
+				if src.IsCxx {
 					compiler = g.cxx
 				}
 				targetCompileJobs = append(targetCompileJobs, compileJob{
-					src:    src.src,
-					obj:    objPath,
+					src:    src.Src,
+					obj:    absoluteObjPath,
 					cflags: target.cflags,
-					isCxx:  src.isCxx,
+					isCxx:  src.IsCxx,
 					cc:     compiler,
 				})
 			}
@@ -253,7 +241,7 @@ func (g *QobsBuilder) executeBuild(compileJobs []compileJob, linkJobs []linkJob)
 }
 
 // isSourceFileDirty checks if a single source file needs to be recompiled
-func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *BuildState) (bool, error) {
+func (g *QobsBuilder) isSourceFileDirty(src SourceFile, objPath string, state *BuildState) (bool, error) {
 	if _, err := os.Stat(objPath); os.IsNotExist(err) {
 		return true, nil
 	}
@@ -262,14 +250,14 @@ func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *B
 		return true, nil
 	}
 
-	hash, err := g.fileHash(src.src)
+	hash, err := g.fileHash(src.Src)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return true, fmt.Errorf("source file %q not found", src.src)
+			return true, fmt.Errorf("source file %q not found", src.Src)
 		}
 		return true, err
 	}
-	if prevHash, exists := state.Sources[src.src]; !exists || prevHash != hash {
+	if prevHash, exists := state.Sources[src.Src]; !exists || prevHash != hash {
 		return true, nil
 	}
 
@@ -280,7 +268,7 @@ func (g *QobsBuilder) isSourceFileDirty(src sourceFile, objPath string, state *B
 func (g *QobsBuilder) createLinkJob(target buildUnit) (linkJob, error) {
 	objects := make([]string, 0, len(target.sources))
 	for _, src := range target.sources {
-		objects = append(objects, filepath.Join(g.buildDir, src.obj))
+		objects = append(objects, filepath.Join(g.buildDir, src.Obj))
 	}
 
 	dependencies := make([]string, 0, len(target.dependencies))
@@ -420,7 +408,7 @@ func (g *QobsBuilder) fileHash(path string) (string, error) {
 // hasCxxInTarget checks if target or its dependencies have C++ sources
 func (g *QobsBuilder) hasCxxInTarget(target buildUnit) bool {
 	for _, src := range target.sources {
-		if src.isCxx {
+		if src.IsCxx {
 			return true
 		}
 	}
@@ -513,11 +501,11 @@ func (g *QobsBuilder) updateBuildState(target buildUnit) error {
 
 	// hash source files
 	for _, src := range target.sources {
-		hash, err := g.fileHash(src.src)
+		hash, err := g.fileHash(src.Src)
 		if err != nil {
-			return fmt.Errorf("failed to hash source file %s: %w", src.src, err)
+			return fmt.Errorf("failed to hash source file %s: %w", src.Src, err)
 		}
-		state.Sources[src.src] = hash
+		state.Sources[src.Src] = hash
 	}
 
 	// hash dependencies

@@ -3,28 +3,8 @@ package gen
 import (
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
-
-	"github.com/qobs-build/qobs/internal/msg"
 )
-
-// sourceFile represents a single source file and its corresponding object file path
-type sourceFile struct {
-	src   string
-	obj   string
-	isCxx bool // C++ file
-}
-
-// buildUnit represents a single unit to be built (a library or an executable)
-type buildUnit struct {
-	name            string
-	isLib           bool
-	sources         []sourceFile
-	dependencies    []string
-	cflags, ldflags []string
-	basedir         string
-}
 
 type NinjaGen struct {
 	cc, cxx string
@@ -42,36 +22,19 @@ var ninjaPathEscaper = strings.NewReplacer(":", "$:", " ", "$ ")
 func quote(s string) string { return ninjaPathEscaper.Replace(s) }
 
 // AddTarget adds a package (library or executable) to the build graph
-func (g *NinjaGen) AddTarget(name, basedir string, sources, dependencies []string, isLib bool, cflags, ldflags []string) {
+func (g *NinjaGen) AddTarget(name, basedir string, sources []SourceFile, dependencies []string, isLib bool, cflags, ldflags []string) {
 	if g.targets == nil {
 		g.targets = make(map[string]buildUnit)
-	}
-
-	targetSources := make([]sourceFile, 0, len(sources))
-	for _, srcPath := range sources {
-		rel, err := filepath.Rel(basedir, srcPath)
-		if err != nil {
-			rel = filepath.Base(srcPath)
-			msg.Warn("source file %s is outside of base directory %s", srcPath, basedir)
-		}
-
-		objPath := quote(filepath.ToSlash(filepath.Join("QobsFiles", name+".dir", rel))) + ".obj"
-		targetSources = append(targetSources, sourceFile{src: srcPath, obj: objPath, isCxx: isCxx(srcPath)})
 	}
 
 	g.targets[name] = buildUnit{
 		name:         name,
 		isLib:        isLib,
-		sources:      targetSources,
+		sources:      sources,
 		dependencies: dependencies,
 		cflags:       cflags,
 		ldflags:      ldflags,
 	}
-}
-
-func isCxx(path string) bool {
-	ext := filepath.Ext(filepath.Base(path))
-	return ext == ".cpp" || ext == ".cc" || ext == ".c++" || ext == ".cxx"
 }
 
 func (g *NinjaGen) Generate() string {
@@ -117,11 +80,11 @@ func (g *NinjaGen) Generate() string {
 	var useCxxLinker bool
 	for _, target := range g.targets {
 		for _, source := range target.sources {
-			if source.isCxx {
-				writeln(&sb, "build ", source.obj, ": cxx ", quote(source.src))
+			if source.IsCxx {
+				writeln(&sb, "build ", source.Obj, ": cxx ", quote(source.Src))
 				useCxxLinker = true
 			} else {
-				writeln(&sb, "build ", source.obj, ": cc ", quote(source.src))
+				writeln(&sb, "build ", source.Obj, ": cc ", quote(source.Src))
 			}
 			writeln(&sb, "  cflags = ", strings.Join(target.cflags, " "))
 		}
@@ -140,7 +103,7 @@ func (g *NinjaGen) Generate() string {
 
 		// add the object files and dependencies of this package
 		for _, source := range target.sources {
-			write(&sb, " ", source.obj)
+			write(&sb, " ", source.Obj)
 		}
 		for _, dep := range target.dependencies {
 			write(&sb, " ", dep)
